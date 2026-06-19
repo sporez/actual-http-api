@@ -26,7 +26,6 @@ const openapiSpecification = swaggerJsdoc({
             type: 'apiKey',
             name: 'x-api-key',
             in: 'header',
-            scheme: 'http',
           },
         },
       },

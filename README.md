@@ -14,6 +14,20 @@ Notable additions in this fork include:
 
 For Actualist deployments, use this fork's `main` branch or a tagged release from `sporez/actual-http-api`. Upstreamable changes are intended to be proposed back to `jhonderson/actual-http-api` as focused pull requests.
 
+### Actualist extension endpoints
+
+These fork endpoints are documented in Swagger UI and covered by tests:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/budgets/{budgetSyncId}/months/{month}/alerts` | Lightweight month alert pills for budget review. |
+| `POST` | `/budgets/{budgetSyncId}/months/{month}/templates/apply` | Apply budget templates for a month, including category-targeted overwrite. |
+| `GET` | `/budgets/{budgetSyncId}/accounts/{accountId}/transactions/search` | Server-backed account transaction search across full history. |
+| `POST` | `/budgets/{budgetSyncId}/rules/run` | Experimental draft transaction rule preview without saving. |
+| `POST` | `/budgets/{budgetSyncId}/transactions/batch-update` | Experimental final transaction editor commit path through Actual batch update. |
+
+The experimental endpoints are enabled by default and can be disabled with `EXPERIMENTAL_OPERATIONS_ENABLED=false`; when disabled, they are also removed from the served Swagger spec. The upstream Docker image does not contain these fork endpoints, so Actualist deployments should build or run this fork until a fork-specific image is published.
+
 ## About
 
 Basic HTTP Api wrapping the [Actual Budget](https://actualbudget.org/) [NodeJS api](https://actualbudget.org/docs/api/).

@@ -301,9 +301,12 @@ module.exports = (router) => {
    *                   - fill-empty
    *                   - overwrite
    *                 default: fill-empty
+   *                 description: Use overwrite when categoryIds is provided.
    *               categoryIds:
    *                 type: array
    *                 nullable: true
+   *                 minItems: 1
+   *                 description: Optional category ids for category-targeted apply. Category-targeted apply is overwrite-only.
    *                 items:
    *                   type: string
    *             examples:

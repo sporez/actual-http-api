@@ -230,14 +230,16 @@ module.exports = (router) => {
    *       - name: limit
    *         in: query
    *         schema:
-   *           type: number
+   *           type: integer
+   *           minimum: 1
    *           default: 50
    *         required: false
    *         description: Number of transactions to return.
    *       - name: offset
    *         in: query
    *         schema:
-   *           type: number
+   *           type: integer
+   *           minimum: 0
    *           default: 0
    *         required: false
    *         description: Number of matching transactions to skip.
@@ -390,7 +392,7 @@ module.exports = (router) => {
    * /budgets/{budgetSyncId}/transactions/batch-update:
    *   post:
    *     summary: "(⚠️ Unofficial) Commits final transaction editor changes through Actual batch update"
-   *     description: "⚠️ Unofficial: Experimental transaction editor endpoint that delegates to Actual's transactions-batch-update behavior. It does not run transaction rules before committing."
+   *     description: "⚠️ Unofficial: Experimental transaction editor endpoint that delegates to Actual's transactions-batch-update behavior. It does not run transaction rules before committing. At least one of added, updated, or deleted must contain an item. Added transactions require id, account, date, and integer amount. Split child amounts must sum exactly to the parent amount, and nested splits are not supported."
    *     tags: [Transactions]
    *     security:
    *       - apiKey: []
@@ -403,19 +405,25 @@ module.exports = (router) => {
    *         application/json:
    *           schema:
    *             type: object
+   *             description: At least one of added, updated, or deleted must contain an item.
    *             properties:
    *               added:
    *                 type: array
+   *                 description: Transactions to create. Each item requires id, account, date, and integer amount.
    *                 items:
    *                   $ref: '#/components/schemas/Transaction'
    *               updated:
    *                 type: array
+   *                 description: Transactions to update. Split updates must include parent account, date, amount, and child amounts that sum to the parent amount.
    *                 items:
    *                   $ref: '#/components/schemas/Transaction'
    *               deleted:
    *                 type: array
+   *                 description: Transactions to delete.
    *                 items:
    *                   type: object
+   *                   required:
+   *                     - id
    *                   properties:
    *                     id:
    *                       type: string
