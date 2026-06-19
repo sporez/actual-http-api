@@ -76,12 +76,15 @@ const { isEmpty, paginate, validatePaginationParameters } = require('../../utils
  *           type: string
  *         subtransactions:
  *           type: array
- *           description: 'Only available in a get or create request'
+ *           description: 'Split child transactions. Supported on get, create, batch create, and batch-update. Only one split level is supported.'
  *           items:
  *             $ref: '#/components/schemas/Transaction'
  */
 
 module.exports = (router) => {
+  const { config } = require('../../config/config');
+  const { EXPERIMENTAL_DISABLED_MESSAGE } = require('./constants');
+
   /**
    * @swagger
    * /budgets/{budgetSyncId}/accounts/{accountId}/transactions:
@@ -177,6 +180,19 @@ module.exports = (router) => {
    *                   payee_name: "Remitly"
    *                   date: "2023-06-23"
    *                   cleared: false
+   *               - learnCategories: false
+   *                 runTransfers: false
+   *                 transaction:
+   *                   account: "729cb492-4eab-468b-9522-75d455cded22"
+   *                   amount: -7374
+   *                   payee_name: "Target"
+   *                   date: "2023-06-23"
+   *                   cleared: false
+   *                   subtransactions:
+   *                     - amount: -5000
+   *                       category: "grocery-category"
+   *                     - amount: -2374
+   *                       category: "household-category"
    *     responses:
    *       '200':
    *         description: ok
@@ -193,6 +209,75 @@ module.exports = (router) => {
    *       '500':
    *         $ref: '#/components/responses/500'
    */
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/accounts/{accountId}/transactions/search:
+   *   get:
+   *     summary: Searches transactions for an account
+   *     description: Searches full account transaction history by payee, imported payee, notes, or category name.
+   *     tags: [Transactions]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/accountId'
+   *       - name: q
+   *         in: query
+   *         schema:
+   *           type: string
+   *         required: true
+   *         description: Search text.
+   *       - name: limit
+   *         in: query
+   *         schema:
+   *           type: number
+   *           default: 50
+   *         required: false
+   *         description: Number of transactions to return.
+   *       - name: offset
+   *         in: query
+   *         schema:
+   *           type: number
+   *           default: 0
+   *         required: false
+   *         description: Number of matching transactions to skip.
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     responses:
+   *       '200':
+   *         description: The matching transactions for an account
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     $ref: '#/components/schemas/Transaction'
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  router.get('/budgets/:budgetSyncId/accounts/:accountId/transactions/search', async (req, res, next) => {
+    try {
+      const query = validateSearchQuery(req.query.q);
+      const limit = validateSearchInteger(req.query.limit, 'limit', 50, { minimum: 1 });
+      const offset = validateSearchInteger(req.query.offset, 'offset', 0);
+
+      await validateAccountExists(res, req.params.accountId);
+      const transactions = await res.locals.budget.searchTransactions(req.params.accountId, query, { limit, offset });
+      res.json({ data: transactions });
+    }
+    catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/budgets/:budgetSyncId/accounts/:accountId/transactions', async (req, res, next) => {
     try {
       if (!req.query.since_date) {
@@ -215,6 +300,7 @@ module.exports = (router) => {
   router.post('/budgets/:budgetSyncId/accounts/:accountId/transactions', async (req, res, next) => {
     try {
       validateTransactionBody(req.body.transaction);
+      validateSplitTransaction(req.body.transaction, 'transaction');
       await validateAccountExists(res, req.params.accountId);
       res.json({'message': await res.locals.budget.addTransaction(req.params.accountId, req.body.transaction, {
           learnCategories: req.body.learnCategories || false,
@@ -286,11 +372,85 @@ module.exports = (router) => {
   router.post('/budgets/:budgetSyncId/accounts/:accountId/transactions/batch', async (req, res, next) => {
     try {
       validateTransactionsArray(req.body.transactions);
+      req.body.transactions.forEach((transaction, index) => {
+        validateSplitTransaction(transaction, `transactions[${index}]`);
+      });
       await validateAccountExists(res, req.params.accountId);
       res.json({'message': await res.locals.budget.addTransactions(req.params.accountId, req.body.transactions, {
           learnCategories: req.body.learnCategories || false,
           runTransfers: req.body.runTransfers || false,
         })}).status(201);
+    } catch(err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/transactions/batch-update:
+   *   post:
+   *     summary: "(⚠️ Unofficial) Commits final transaction editor changes through Actual batch update"
+   *     description: "⚠️ Unofficial: Experimental transaction editor endpoint that delegates to Actual's transactions-batch-update behavior. It does not run transaction rules before committing."
+   *     tags: [Transactions]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               added:
+   *                 type: array
+   *                 items:
+   *                   $ref: '#/components/schemas/Transaction'
+   *               updated:
+   *                 type: array
+   *                 items:
+   *                   $ref: '#/components/schemas/Transaction'
+   *               deleted:
+   *                 type: array
+   *                 items:
+   *                   type: object
+   *                   properties:
+   *                     id:
+   *                       type: string
+   *               learnCategories:
+   *                 type: boolean
+   *                 default: false
+   *               runTransfers:
+   *                 type: boolean
+   *                 default: false
+   *     responses:
+   *       '200':
+   *         description: Actual batch update result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: object
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   *       '501':
+   *         $ref: '#/components/responses/501'
+   */
+  router.post('/budgets/:budgetSyncId/transactions/batch-update', async (req, res, next) => {
+    try {
+      if (!config.experimentalOperationsEnabled) {
+        return res.status(501).json({ error: EXPERIMENTAL_DISABLED_MESSAGE });
+      }
+      const diff = validateBatchUpdateBody(req.body);
+      res.json({'data': await res.locals.budget.batchUpdateTransactions(diff)});
     } catch(err) {
       next(err);
     }
@@ -389,6 +549,9 @@ module.exports = (router) => {
   router.post('/budgets/:budgetSyncId/accounts/:accountId/transactions/import', async (req, res, next) => {
     try {
       validateTransactionsArray(req.body.transactions);
+      req.body.transactions.forEach((transaction, index) => {
+        validateSplitTransaction(transaction, `transactions[${index}]`);
+      });
       await validateAccountExists(res, req.params.accountId);
       const options = {
         defaultCleared: req.body.defaultCleared ?? true,
@@ -582,6 +745,105 @@ module.exports = (router) => {
   function validateTransactionsArray(transactions) {
     if (transactions === undefined || !transactions.length) {
       throw new Error('List of transactions is required');
+    }
+  }
+
+  function validateSearchQuery(query) {
+    if (typeof query !== 'string' || query.trim() === '') {
+      throw new Error('q query parameter is required');
+    }
+    return query.trim();
+  }
+
+  function validateSearchInteger(value, name, defaultValue, { minimum = 0 } = {}) {
+    if (value === undefined) {
+      return defaultValue;
+    }
+
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || String(parsed) !== String(value) || parsed < minimum) {
+      throw new Error(`${name} query parameter must be an integer greater than or equal to ${minimum}`);
+    }
+    return parsed;
+  }
+
+  function validateBatchUpdateBody(body = {}) {
+    const added = body.added ?? [];
+    const updated = body.updated ?? [];
+    const deleted = body.deleted ?? [];
+
+    validateOptionalArray(added, 'added');
+    validateOptionalArray(updated, 'updated');
+    validateOptionalArray(deleted, 'deleted');
+
+    if (!added.length && !updated.length && !deleted.length) {
+      throw new Error('At least one transaction change is required');
+    }
+
+    added.forEach(validateAddedTransaction);
+    [...added, ...updated].forEach((transaction, index) => {
+      validateSplitTransaction(transaction, index < added.length ? `added[${index}]` : `updated[${index - added.length}]`);
+    });
+
+    return {
+      added,
+      updated,
+      deleted,
+      learnCategories: body.learnCategories ?? false,
+      runTransfers: body.runTransfers ?? false,
+    };
+  }
+
+  function validateOptionalArray(value, name) {
+    if (!Array.isArray(value)) {
+      throw new Error(`${name} must be an array`);
+    }
+  }
+
+  function validateSplitTransaction(transaction, path) {
+    if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+      return;
+    }
+    if (!Array.isArray(transaction.subtransactions)) {
+      return;
+    }
+    if (!transaction.account) {
+      throw new Error(`${path}.account is required for split transactions`);
+    }
+    if (!transaction.date) {
+      throw new Error(`${path}.date is required for split transactions`);
+    }
+    if (!Number.isInteger(transaction.amount)) {
+      throw new Error(`${path}.amount must be an integer for split transactions`);
+    }
+    const childTotal = transaction.subtransactions.reduce((total, child, index) => {
+      if (!child || typeof child !== 'object' || Array.isArray(child)) {
+        throw new Error(`${path}.subtransactions[${index}] must be an object`);
+      }
+      if (Array.isArray(child.subtransactions)) {
+        throw new Error(`${path}.subtransactions[${index}].subtransactions is not supported`);
+      }
+      if (!Number.isInteger(child.amount)) {
+        throw new Error(`${path}.subtransactions[${index}].amount must be an integer`);
+      }
+      return total + child.amount;
+    }, 0);
+    if (childTotal !== transaction.amount) {
+      throw new Error(`${path}.subtransactions amounts must sum to transaction.amount`);
+    }
+  }
+
+  function validateAddedTransaction(transaction) {
+    if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+      throw new Error('added transaction information is required');
+    }
+    ['id', 'account', 'date'].forEach((field) => {
+      if (!transaction[field]) {
+        throw new Error(`added transaction.${field} is required`);
+      }
+    });
+    if (!Number.isInteger(transaction.amount)) {
+      throw new Error('added transaction.amount must be an integer');
     }
   }
 }

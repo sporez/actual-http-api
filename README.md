@@ -1,7 +1,22 @@
+# actual-http-api
+
+## Actualist API fork
+
+This fork is maintained as the API companion for [Actualist](https://github.com/sporez/actualist), a native iOS client for Actual Budget. It stays close to the upstream Actual HTTP API while exposing a small set of app-facing endpoints that Actualist needs for budget review and transaction editing.
+
+Notable additions in this fork include:
+
+- Budget month alerts for lightweight app badges and review prompts.
+- Transaction search and editor-style write endpoints backed by Actual internals.
+- Rules preview for draft transactions.
+- Budget template apply endpoints, including whole-month and category-targeted overwrite flows.
+- Explicit split transaction payload validation for multi-category transactions.
+
+For Actualist deployments, use this fork's `main` branch or a tagged release from `sporez/actual-http-api`. Upstreamable changes are intended to be proposed back to `jhonderson/actual-http-api` as focused pull requests.
+
 ## About
 
 Basic HTTP Api wrapping the [Actual Budget](https://actualbudget.org/) [NodeJS api](https://actualbudget.org/docs/api/).
-# actual-http-api
 
 Lightweight HTTP wrapper around the Actual Budget Node.js API. Exposes a simple REST interface so non-Node apps can interact with an Actual server.
 

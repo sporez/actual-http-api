@@ -67,6 +67,127 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     return categoryGroups.find((categoryGroup) => categoryGroupId == categoryGroup.id);
   }
 
+  async function getMonthAlerts(month) {
+    const budgetMonth = await getMonth(month);
+    const alerts = [];
+
+    if (budgetMonth.toBudget > 0) {
+      alerts.push({
+        kind: 'toBudget',
+        severity: 'positive',
+        title: 'To Budget',
+        amount: budgetMonth.toBudget,
+        count: null,
+        actionTitle: null,
+      });
+    }
+
+    const overspentCategoryCount = countOverspentCategories(budgetMonth);
+    if (overspentCategoryCount > 0) {
+      alerts.push({
+        kind: 'overspending',
+        severity: 'danger',
+        title: 'Overspent categories',
+        amount: null,
+        count: overspentCategoryCount,
+        actionTitle: 'Cover',
+      });
+    }
+
+    const uncategorizedTransactionCount = await countUncategorizedTransactions(month);
+    if (uncategorizedTransactionCount > 0) {
+      alerts.push({
+        kind: 'uncategorizedTransactions',
+        severity: 'warning',
+        title: 'Uncategorized transactions',
+        amount: null,
+        count: uncategorizedTransactionCount,
+        actionTitle: 'Review',
+      });
+    }
+
+    return {
+      month,
+      alerts,
+    };
+  }
+
+  function countOverspentCategories(budgetMonth) {
+    return (budgetMonth.categoryGroups || []).reduce((count, categoryGroup) => {
+      if (categoryGroup.hidden || categoryGroup.is_income) {
+        return count;
+      }
+      const categories = categoryGroup.categories || [];
+      return count + categories.filter((category) => {
+        return !category.hidden && !category.is_income && category.balance < 0;
+      }).length;
+    }, 0);
+  }
+
+  async function countUncategorizedTransactions(month) {
+    const startDate = `${month}-01`;
+    const nextMonthDate = getNextMonthDate(month);
+    const result = await runQuery(
+      actualApi.q('transactions')
+        .options({ splits: 'all' })
+        .filter({
+          is_parent: false,
+          tombstone: false,
+          category: null,
+          transfer_id: null,
+          date: [{ $gte: startDate }, { $lt: nextMonthDate }],
+        })
+        .select(['id'])
+    );
+    return ((result && result.data) || []).length;
+  }
+
+  function getNextMonthDate(month) {
+    const [year, monthNumber] = month.split('-').map((value) => parseInt(value, 10));
+    const nextYear = monthNumber === 12 ? year + 1 : year;
+    const nextMonth = monthNumber === 12 ? 1 : monthNumber + 1;
+    return `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+  }
+
+  async function applyBudgetTemplates(month, { mode, categoryIds } = {}) {
+    const hasCategoryIds = categoryIds !== undefined && categoryIds !== null;
+    const applyMode = mode ?? (hasCategoryIds ? undefined : 'fill-empty');
+
+    if (!['fill-empty', 'overwrite'].includes(applyMode)) {
+      throw new Error('mode must be one of: fill-empty, overwrite');
+    }
+
+    if (!hasCategoryIds) {
+      if (applyMode === 'fill-empty') {
+        return actualApi.internal.send('budget/apply-goal-template', { month });
+      }
+      return actualApi.internal.send('budget/overwrite-goal-template', { month });
+    }
+
+    if (applyMode !== 'overwrite') {
+      throw new Error('categoryIds can only be used with mode overwrite');
+    }
+    if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
+      throw new Error('categoryIds must be a non-empty array');
+    }
+    categoryIds.forEach((categoryId) => {
+      if (typeof categoryId !== 'string' || categoryId.trim() === '') {
+        throw new Error('categoryIds must contain non-empty strings');
+      }
+    });
+
+    if (categoryIds.length === 1) {
+      return actualApi.internal.send('budget/apply-single-template', {
+        month,
+        category: categoryIds[0],
+      });
+    }
+    return actualApi.internal.send('budget/apply-multiple-templates', {
+      month,
+      categoryIds,
+    });
+  }
+
   async function getAccounts() {
     return actualApi.getAccounts();
   }
@@ -105,6 +226,35 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     return actualApi.getTransactions(accountId, sinceDate, untilDate);
   }
 
+  async function searchTransactions(accountId, query, { limit = 50, offset = 0 } = {}) {
+    const searchTerm = query.trim();
+    const likeTerm = `%${escapeLikeTerm(searchTerm)}%`;
+    const result = await runQuery(
+      actualApi.q('transactions')
+        .options({ splits: 'grouped' })
+        .filter({
+          account: accountId,
+          tombstone: false,
+          is_parent: false,
+          $or: [
+            { 'payee.name': { $like: likeTerm } },
+            { imported_payee: { $like: likeTerm } },
+            { notes: { $like: likeTerm } },
+            { 'category.name': { $like: likeTerm } },
+          ],
+        })
+        .orderBy([{ date: 'desc' }, { sort_order: 'desc' }])
+        .limit(limit)
+        .offset(offset)
+        .select('*')
+    );
+    return (result && result.data) || [];
+  }
+
+  function escapeLikeTerm(value) {
+    return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+  }
+
   async function addTransaction(accountId, transaction, { learnCategories = false, runTransfers = false } = {}) {
     const transactionIds = await addTransactions(accountId, [transaction], {learnCategories, runTransfers});
     if (transactionIds && Array.isArray(transactionIds) && transactionIds.length > 0) {
@@ -115,6 +265,28 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
 
   async function addTransactions(accountId, transactions, { learnCategories = false, runTransfers = false } = {}) {
     return actualApi.addTransactions(accountId, transactions, {learnCategories, runTransfers});
+  }
+
+  // @actual-app/api does not expose public wrappers for these editor handlers;
+  // init() exposes internal.send for registered Actual core messages.
+  async function runRules(transaction) {
+    return actualApi.internal.send('rules-run', { transaction });
+  }
+
+  async function batchUpdateTransactions({
+    added = [],
+    updated = [],
+    deleted = [],
+    learnCategories = false,
+    runTransfers = false,
+  } = {}) {
+    return actualApi.internal.send('transactions-batch-update', {
+      added,
+      updated,
+      deleted,
+      learnCategories,
+      runTransfers,
+    });
   }
 
   async function importTransactions(accountId, transactions, {
@@ -410,6 +582,8 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     updateMonthCategory: updateMonthCategory,
     getMonthCategoryGroups: getMonthCategoryGroups,
     getMonthCategoryGroup: getMonthCategoryGroup,
+    getMonthAlerts: getMonthAlerts,
+    applyBudgetTemplates: applyBudgetTemplates,
     getAccounts: getAccounts,
     getAccount: getAccount,
     getAccountBalance: getAccountBalance,
@@ -419,8 +593,11 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     closeAccount: closeAccount,
     reopenAccount: reopenAccount,
     getTransactions: getTransactions,
+    searchTransactions: searchTransactions,
     addTransaction: addTransaction,
     addTransactions: addTransactions,
+    runRules: runRules,
+    batchUpdateTransactions: batchUpdateTransactions,
     updateTransaction: updateTransaction,
     deleteTransaction: deleteTransaction,
     deleteTransactions: deleteTransactions,

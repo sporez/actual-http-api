@@ -119,6 +119,38 @@ const { isEmpty } = require('../../utils/utils');
  *         received:
  *           type: integer
  *           description: Present for income categories only
+ *     BudgetMonthAlert:
+ *       required:
+ *         - kind
+ *         - severity
+ *         - title
+ *       type: object
+ *       properties:
+ *         kind:
+ *           type: string
+ *           enum:
+ *             - toBudget
+ *             - overspending
+ *             - uncategorizedTransactions
+ *         severity:
+ *           type: string
+ *           enum:
+ *             - positive
+ *             - warning
+ *             - danger
+ *         title:
+ *           type: string
+ *         amount:
+ *           type: integer
+ *           nullable: true
+ *           description: Actual minor-unit amount, only used for money alerts.
+ *         count:
+ *           type: integer
+ *           nullable: true
+ *           description: Count-based alert value.
+ *         actionTitle:
+ *           type: string
+ *           nullable: true
  */
 
 module.exports = (router) => {
@@ -167,7 +199,157 @@ module.exports = (router) => {
       next(err);
     }
   });
+
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/months/{month}/alerts:
+   *   get:
+   *     summary: Get budget month alert counts
+   *     description: Returns lightweight alert data for a budget month so clients can render reusable budget-page alert pills without fetching and deriving transaction state client-side.
+   *     tags: [Budget Months]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/month'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     responses:
+   *       '200':
+   *         description: Budget month alert counts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   required:
+   *                     - month
+   *                     - alerts
+   *                   type: object
+   *                   properties:
+   *                     month:
+   *                       type: string
+   *                       example: '2026-06'
+   *                     alerts:
+   *                       type: array
+   *                       description: Ordered alert payloads suitable for top-of-budget display.
+   *                       items:
+   *                         $ref: '#/components/schemas/BudgetMonthAlert'
+   *               examples:
+   *                 - data:
+   *                     month: '2026-06'
+   *                     alerts:
+   *                       - kind: toBudget
+   *                         severity: positive
+   *                         title: To Budget
+   *                         amount: 125000
+   *                         count: null
+   *                         actionTitle: null
+   *                       - kind: overspending
+   *                         severity: danger
+   *                         title: Overspent categories
+   *                         amount: null
+   *                         count: 2
+   *                         actionTitle: Cover
+   *                       - kind: uncategorizedTransactions
+   *                         severity: warning
+   *                         title: Uncategorized transactions
+   *                         amount: null
+   *                         count: 4
+   *                         actionTitle: Review
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  router.get('/budgets/:budgetSyncId/months/:month/alerts', async (req, res, next) => {
+    try {
+      validateMonthFormat(req.params.month);
+      res.json({'data': await res.locals.budget.getMonthAlerts(req.params.month)});
+    } catch(err) {
+      next(err);
+    }
+  });
   
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/months/{month}/templates/apply:
+   *   post:
+   *     summary: "(🔧 Extended) Applies budget templates for a month"
+   *     description: Applies Actual budget templates for a month. Whole-month fill-empty applies templates only to unbudgeted categories; overwrite forces template values. Category-targeted apply is overwrite-only.
+   *     tags: [Budget Months]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/month'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     requestBody:
+   *       required: false
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               mode:
+   *                 type: string
+   *                 enum:
+   *                   - fill-empty
+   *                   - overwrite
+   *                 default: fill-empty
+   *               categoryIds:
+   *                 type: array
+   *                 nullable: true
+   *                 items:
+   *                   type: string
+   *             examples:
+   *               - mode: fill-empty
+   *               - mode: overwrite
+   *                 categoryIds:
+   *                   - '106963b3-ab82-4734-ad70-1d7dc2a52ff4'
+   *     responses:
+   *       '200':
+   *         description: Template application result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     type:
+   *                       type: string
+   *                     message:
+   *                       type: string
+   *                     pre:
+   *                       type: string
+   *                       nullable: true
+   *                     sticky:
+   *                       type: boolean
+   *                       nullable: true
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  router.post('/budgets/:budgetSyncId/months/:month/templates/apply', async (req, res, next) => {
+    try {
+      validateMonthFormat(req.params.month);
+      res.json({'data': await res.locals.budget.applyBudgetTemplates(req.params.month, req.body || {})});
+    } catch(err) {
+      next(err);
+    }
+  });
+
   /**
    * @swagger
    * /budgets/{budgetSyncId}/months/{month}:
@@ -689,4 +871,10 @@ module.exports = (router) => {
       next(err);
     }
   });
+
+  function validateMonthFormat(month) {
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new Error(`Invalid month format, use YYYY-MM: ${month}`);
+    }
+  }
 }

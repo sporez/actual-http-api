@@ -55,8 +55,23 @@ describe('Transactions Routes', () => {
           cleared: false,
         },
       ]),
+      searchTransactions: jest.fn().mockResolvedValue([
+        {
+          id: 'txn-search',
+          account: 'acc1',
+          date: '2023-08-03',
+          amount: -1250,
+          payee: 'Target',
+          cleared: true,
+        },
+      ]),
       addTransaction: jest.fn().mockResolvedValue('ok'),
       addTransactions: jest.fn().mockResolvedValue('ok'),
+      batchUpdateTransactions: jest.fn().mockResolvedValue({
+        added: ['txn-new'],
+        updated: [],
+        deleted: [],
+      }),
       importTransactions: jest.fn().mockResolvedValue({
         imported: 2,
       }),
@@ -88,6 +103,8 @@ describe('Transactions Routes', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.clearAllTimers();
+    jest.dontMock('../../../src/config/config');
+    delete process.env.EXPERIMENTAL_OPERATIONS_ENABLED;
   });
 
   describe('GET /budgets/:budgetSyncId/accounts/:accountId/transactions', () => {
@@ -215,6 +232,84 @@ describe('Transactions Routes', () => {
     });
   });
 
+  describe('GET /budgets/:budgetSyncId/accounts/:accountId/transactions/search', () => {
+    it('should register the route', () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      expect(mockRouter.get).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/accounts/:accountId/transactions/search',
+        expect.any(Function)
+      );
+    });
+
+    it('should search transactions for an account', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/accounts/:accountId/transactions/search'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.query.q = ' target ';
+      mockReq.query.limit = '25';
+      mockReq.query.offset = '50';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.getAccount).toHaveBeenCalledWith('acc1');
+      expect(mockBudget.searchTransactions).toHaveBeenCalledWith('acc1', 'target', {
+        limit: 25,
+        offset: 50,
+      });
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ id: 'txn-search' })],
+      });
+    });
+
+    it('should default search paging options', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/accounts/:accountId/transactions/search'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.query.q = 'target';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.searchTransactions).toHaveBeenCalledWith('acc1', 'target', {
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    it('should reject without q', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/accounts/:accountId/transactions/search'];
+      mockReq.params.accountId = 'acc1';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.searchTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should reject invalid search paging options', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/accounts/:accountId/transactions/search'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.query.q = 'target';
+      mockReq.query.limit = '0';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.searchTransactions).not.toHaveBeenCalled();
+    });
+  });
+
   describe('POST /budgets/:budgetSyncId/accounts/:accountId/transactions', () => {
     it('should register the route', () => {
       const transactionsModule = require('../../../src/v1/routes/transactions');
@@ -276,6 +371,57 @@ describe('Transactions Routes', () => {
         learnCategories: false,
         runTransfers: false,
       });
+    });
+
+
+    it('should create a split transaction', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/transactions'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.body = {
+        transaction: {
+          date: '2023-08-01',
+          amount: -7500,
+          account: 'acc1',
+          subtransactions: [
+            { amount: -5000, category: 'cat-food' },
+            { amount: -2500, category: 'cat-home' },
+          ],
+        },
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.addTransaction).toHaveBeenCalledWith('acc1', mockReq.body.transaction, {
+        learnCategories: false,
+        runTransfers: false,
+      });
+    });
+
+    it('should reject split transaction child amount mismatch', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/transactions'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.body = {
+        transaction: {
+          date: '2023-08-01',
+          amount: -7500,
+          account: 'acc1',
+          subtransactions: [
+            { amount: -5000, category: 'cat-food' },
+            { amount: -2400, category: 'cat-home' },
+          ],
+        },
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.addTransaction).not.toHaveBeenCalled();
     });
 
     it('should reject without transaction property', async () => {
@@ -479,6 +625,240 @@ describe('Transactions Routes', () => {
       await handler(mockReq, mockRes, mockNext);
 
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
+  });
+
+  describe('POST /budgets/:budgetSyncId/transactions/batch-update', () => {
+    it('should register the route', () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      expect(mockRouter.post).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/transactions/batch-update',
+        expect.any(Function)
+      );
+    });
+
+    it('should forward transaction changes and options', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+          payee: 'payee1',
+          category: 'cat-final',
+        }],
+        updated: [{ id: 'txn-existing', notes: 'Updated' }],
+        deleted: [{ id: 'txn-delete' }],
+        learnCategories: true,
+        runTransfers: true,
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.batchUpdateTransactions).toHaveBeenCalledWith(mockReq.body);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: {
+          added: ['txn-new'],
+          updated: [],
+          deleted: [],
+        },
+      });
+    });
+
+    it('should default missing arrays and options conservatively', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.batchUpdateTransactions).toHaveBeenCalledWith({
+        added: mockReq.body.added,
+        updated: [],
+        deleted: [],
+        learnCategories: false,
+        runTransfers: false,
+      });
+    });
+
+    it('should reject an empty diff', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [],
+        updated: [],
+        deleted: [],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.batchUpdateTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should reject added transactions without required fields', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          amount: -1299,
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.batchUpdateTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should forward split transaction changes', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -7500,
+          subtransactions: [
+            { amount: -5000, category: 'cat-food' },
+            { amount: -2500, category: 'cat-home' },
+          ],
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.batchUpdateTransactions).toHaveBeenCalledWith({
+        added: mockReq.body.added,
+        updated: [],
+        deleted: [],
+        learnCategories: false,
+        runTransfers: false,
+      });
+    });
+
+    it('should reject nested split transactions', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -7500,
+          subtransactions: [
+            {
+              amount: -7500,
+              category: 'cat-food',
+              subtransactions: [{ amount: -7500, category: 'cat-nested' }],
+            },
+          ],
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.batchUpdateTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should reject non-integer split child amounts', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -7500,
+          subtransactions: [
+            { amount: -5000.5, category: 'cat-food' },
+            { amount: -2499.5, category: 'cat-home' },
+          ],
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.batchUpdateTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should return 501 when experimental operations are disabled', async () => {
+      jest.doMock('../../../src/config/config', () => ({
+        config: {
+          experimentalOperationsEnabled: false,
+        },
+      }));
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(501);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'This operation is experimental and is currently disabled.',
+      });
+      expect(mockBudget.batchUpdateTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should pass batchUpdateTransactions errors to next', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/transactions/batch-update'];
+      const error = new Error('Batch update failed');
+      mockBudget.batchUpdateTransactions.mockRejectedValueOnce(error);
+      mockReq.body = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+        }],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
     });
   });
 

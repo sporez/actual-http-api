@@ -49,6 +49,14 @@ describe('Rules Routes', () => {
         id: 'new-rule',
         name: 'New Rule',
       }),
+      runRules: jest.fn().mockResolvedValue({
+        id: 'draft-txn',
+        account: 'acc1',
+        date: '2026-06-14',
+        amount: -1299,
+        payee: 'payee1',
+        category: 'cat1',
+      }),
       updateRule: jest.fn().mockResolvedValue({
         id: 'rule1',
         name: 'Updated Rule',
@@ -76,6 +84,8 @@ describe('Rules Routes', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.clearAllTimers();
+    jest.dontMock('../../../src/config/config');
+    delete process.env.EXPERIMENTAL_OPERATIONS_ENABLED;
   });
 
   describe('GET /budgets/:budgetSyncId/rules', () => {
@@ -222,6 +232,104 @@ describe('Rules Routes', () => {
       await handler(mockReq, mockRes, mockNext);
 
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
+  });
+
+  describe('POST /budgets/:budgetSyncId/rules/run', () => {
+    it('should register the route', () => {
+      const rulesModule = require('../../../src/v1/routes/rules');
+      rulesModule(mockRouter);
+
+      expect(mockRouter.post).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/rules/run',
+        expect.any(Function)
+      );
+    });
+
+    it('should run rules against a draft transaction', async () => {
+      const rulesModule = require('../../../src/v1/routes/rules');
+      rulesModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/rules/run'];
+      mockReq.body = {
+        transaction: {
+          id: 'draft-txn',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+          payee: 'payee1',
+        },
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.runRules).toHaveBeenCalledWith(mockReq.body.transaction);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          id: 'draft-txn',
+          category: 'cat1',
+        }),
+      });
+    });
+
+    it('should reject missing transaction', async () => {
+      const rulesModule = require('../../../src/v1/routes/rules');
+      rulesModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/rules/run'];
+      mockReq.body = {};
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.runRules).not.toHaveBeenCalled();
+    });
+
+    it('should return 501 when experimental operations are disabled', async () => {
+      jest.doMock('../../../src/config/config', () => ({
+        config: {
+          experimentalOperationsEnabled: false,
+        },
+      }));
+      const rulesModule = require('../../../src/v1/routes/rules');
+      rulesModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/rules/run'];
+      mockReq.body = {
+        transaction: {
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+        },
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(501);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'This operation is experimental and is currently disabled.',
+      });
+      expect(mockBudget.runRules).not.toHaveBeenCalled();
+    });
+
+    it('should pass runRules errors to next', async () => {
+      const rulesModule = require('../../../src/v1/routes/rules');
+      rulesModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/rules/run'];
+      const error = new Error('Rule error');
+      mockBudget.runRules.mockRejectedValueOnce(error);
+      mockReq.body = {
+        transaction: {
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+        },
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
     });
   });
 

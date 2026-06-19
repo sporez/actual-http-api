@@ -47,6 +47,23 @@ describe('Budget Months Routes', () => {
         totalBalance: 1000,
         categoryGroups: [],
       }),
+      getMonthAlerts: jest.fn().mockResolvedValue({
+        month: '2023-08',
+        alerts: [
+          {
+            kind: 'toBudget',
+            severity: 'positive',
+            title: 'To Budget',
+            amount: 1000,
+            count: null,
+            actionTitle: null,
+          },
+        ],
+      }),
+      applyBudgetTemplates: jest.fn().mockResolvedValue({
+        type: 'message',
+        message: 'Successfully applied templates to 3 categories',
+      }),
       getMonthCategories: jest.fn().mockResolvedValue([
         {
           id: 'cat1',
@@ -194,6 +211,145 @@ describe('Budget Months Routes', () => {
       mockReq.params.month = '2023-08';
       const error = new Error('Month not found');
       mockBudget.getMonth.mockRejectedValueOnce(error);
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe('GET /budgets/:budgetSyncId/months/:month/alerts', () => {
+    it('should register the route', () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      expect(mockRouter.get).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/months/:month/alerts',
+        expect.any(Function)
+      );
+    });
+
+    it('should return budget month alerts', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/months/:month/alerts'];
+      mockReq.params.month = '2023-08';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.getMonthAlerts).toHaveBeenCalledWith('2023-08');
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: {
+          month: '2023-08',
+          alerts: [
+            expect.objectContaining({
+              kind: 'toBudget',
+              severity: 'positive',
+            }),
+          ],
+        },
+      });
+    });
+
+    it('should reject invalid month format', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/months/:month/alerts'];
+      mockReq.params.month = '2023-8';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.getMonthAlerts).not.toHaveBeenCalled();
+    });
+
+    it('should handle errors from getMonthAlerts', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/months/:month/alerts'];
+      mockReq.params.month = '2023-08';
+      const error = new Error('Alert failure');
+      mockBudget.getMonthAlerts.mockRejectedValueOnce(error);
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe('POST /budgets/:budgetSyncId/months/:month/templates/apply', () => {
+    it('should register the route', () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      expect(mockRouter.post).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/months/:month/templates/apply',
+        expect.any(Function)
+      );
+    });
+
+    it('should apply whole-month templates with omitted body options', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/months/:month/templates/apply'];
+      mockReq.params.month = '2023-08';
+      mockReq.body = undefined;
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.applyBudgetTemplates).toHaveBeenCalledWith('2023-08', {});
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: {
+          type: 'message',
+          message: 'Successfully applied templates to 3 categories',
+        },
+      });
+    });
+
+    it('should apply category-targeted overwrite templates', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/months/:month/templates/apply'];
+      mockReq.params.month = '2023-08';
+      mockReq.body = {
+        mode: 'overwrite',
+        categoryIds: ['cat1', 'cat2'],
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.applyBudgetTemplates).toHaveBeenCalledWith('2023-08', {
+        mode: 'overwrite',
+        categoryIds: ['cat1', 'cat2'],
+      });
+    });
+
+    it('should reject invalid month format', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/months/:month/templates/apply'];
+      mockReq.params.month = '2023-8';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.applyBudgetTemplates).not.toHaveBeenCalled();
+    });
+
+    it('should handle template apply errors', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/months/:month/templates/apply'];
+      mockReq.params.month = '2023-08';
+      const error = new Error('Template failure');
+      mockBudget.applyBudgetTemplates.mockRejectedValueOnce(error);
 
       await handler(mockReq, mockRes, mockNext);
 

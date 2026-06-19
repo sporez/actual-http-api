@@ -116,8 +116,15 @@ describe('Budget Module', () => {
       getNote: jest.fn().mockResolvedValue({ id: 'cat1', note: 'Category note' }),
       updateNote: jest.fn().mockResolvedValue(undefined),
       shutdown: jest.fn(),
+      internal: {
+        send: jest.fn().mockResolvedValue(undefined),
+      },
       q: jest.fn(() => ({
+        options: jest.fn().mockReturnThis(),
         filter: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis()
       })),
       runQuery: jest.fn(),
@@ -197,6 +204,173 @@ describe('Budget Module', () => {
       const group = await budget.getMonthCategoryGroup('2024-01', 'cg1');
       expect(group.id).toBe('cg1');
     });
+
+    it('should get budget month alerts in display order', async () => {
+      mockActualApi.getBudgetMonth.mockResolvedValueOnce({
+        month: '2026-06',
+        toBudget: 125000,
+        categoryGroups: [
+          {
+            id: 'income-group',
+            is_income: true,
+            hidden: false,
+            categories: [
+              { id: 'income-cat', is_income: true, hidden: false, balance: -5000 },
+            ],
+          },
+          {
+            id: 'expense-group',
+            is_income: false,
+            hidden: false,
+            categories: [
+              { id: 'cat1', is_income: false, hidden: false, balance: -1000 },
+              { id: 'cat2', is_income: false, hidden: false, balance: -2000 },
+              { id: 'cat3', is_income: false, hidden: false, balance: 1000 },
+              { id: 'cat4', is_income: false, hidden: true, balance: -3000 },
+            ],
+          },
+        ],
+      });
+      mockActualApi.aqlQuery.mockResolvedValueOnce({
+        data: [
+          { id: 'txn1' },
+          { id: 'txn2' },
+          { id: 'txn3' },
+          { id: 'txn4' },
+        ],
+      });
+
+      const result = await budget.getMonthAlerts('2026-06');
+
+      expect(result).toEqual({
+        month: '2026-06',
+        alerts: [
+          {
+            kind: 'toBudget',
+            severity: 'positive',
+            title: 'To Budget',
+            amount: 125000,
+            count: null,
+            actionTitle: null,
+          },
+          {
+            kind: 'overspending',
+            severity: 'danger',
+            title: 'Overspent categories',
+            amount: null,
+            count: 2,
+            actionTitle: 'Cover',
+          },
+          {
+            kind: 'uncategorizedTransactions',
+            severity: 'warning',
+            title: 'Uncategorized transactions',
+            amount: null,
+            count: 4,
+            actionTitle: 'Review',
+          },
+        ],
+      });
+    });
+
+    it('should omit zero-value budget month alerts', async () => {
+      mockActualApi.getBudgetMonth.mockResolvedValueOnce({
+        month: '2026-06',
+        toBudget: 0,
+        categoryGroups: [
+          {
+            id: 'expense-group',
+            is_income: false,
+            hidden: false,
+            categories: [
+              { id: 'cat1', is_income: false, hidden: false, balance: 0 },
+            ],
+          },
+        ],
+      });
+      mockActualApi.aqlQuery.mockResolvedValueOnce({ data: [] });
+
+      const result = await budget.getMonthAlerts('2026-06');
+
+      expect(result).toEqual({
+        month: '2026-06',
+        alerts: [],
+      });
+    });
+
+    it('should query uncategorized transactions for the requested month', async () => {
+      mockActualApi.getBudgetMonth.mockResolvedValueOnce({
+        month: '2026-12',
+        toBudget: 0,
+        categoryGroups: [],
+      });
+      mockActualApi.aqlQuery.mockResolvedValueOnce({ data: [] });
+
+      await budget.getMonthAlerts('2026-12');
+
+      const query = mockActualApi.q.mock.results[0].value;
+      expect(mockActualApi.q).toHaveBeenCalledWith('transactions');
+      expect(query.options).toHaveBeenCalledWith({ splits: 'all' });
+      expect(query.filter).toHaveBeenCalledWith({
+        is_parent: false,
+        tombstone: false,
+        category: null,
+        transfer_id: null,
+        date: [{ $gte: '2026-12-01' }, { $lt: '2027-01-01' }],
+      });
+      expect(query.select).toHaveBeenCalledWith(['id']);
+      expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
+    });
+    it('should apply whole-month templates through Actual internals', async () => {
+      const notification = { type: 'message', message: 'Successfully applied templates to 3 categories' };
+      mockActualApi.internal.send.mockResolvedValueOnce(notification);
+
+      const result = await budget.applyBudgetTemplates('2026-06', { mode: 'fill-empty' });
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('budget/apply-goal-template', { month: '2026-06' });
+      expect(result).toEqual(notification);
+    });
+
+    it('should overwrite whole-month templates through Actual internals', async () => {
+      const notification = { type: 'message', message: 'Successfully applied templates to 3 categories' };
+      mockActualApi.internal.send.mockResolvedValueOnce(notification);
+
+      const result = await budget.applyBudgetTemplates('2026-06', { mode: 'overwrite' });
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('budget/overwrite-goal-template', { month: '2026-06' });
+      expect(result).toEqual(notification);
+    });
+
+    it('should apply a single category template through Actual internals', async () => {
+      await budget.applyBudgetTemplates('2026-06', { mode: 'overwrite', categoryIds: ['cat1'] });
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('budget/apply-single-template', {
+        month: '2026-06',
+        category: 'cat1',
+      });
+    });
+
+    it('should apply multiple category templates through Actual internals', async () => {
+      await budget.applyBudgetTemplates('2026-06', { mode: 'overwrite', categoryIds: ['cat1', 'cat2'] });
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('budget/apply-multiple-templates', {
+        month: '2026-06',
+        categoryIds: ['cat1', 'cat2'],
+      });
+    });
+
+    it('should reject category-targeted fill-empty template apply', async () => {
+      await expect(budget.applyBudgetTemplates('2026-06', { mode: 'fill-empty', categoryIds: ['cat1'] }))
+        .rejects
+        .toThrow('categoryIds can only be used with mode overwrite');
+    });
+
+    it('should reject invalid template apply mode', async () => {
+      await expect(budget.applyBudgetTemplates('2026-06', { mode: 'bogus' }))
+        .rejects
+        .toThrow('mode must be one of: fill-empty, overwrite');
+    });
+
   });
 
   describe('Month Category Updates', () => {
@@ -309,6 +483,35 @@ describe('Budget Module', () => {
       expect(mockActualApi.getTransactions).toHaveBeenCalledWith('acc1', '2024-01-01', '2024-01-31');
     });
 
+    it('should search transactions with ActualQL', async () => {
+      mockActualApi.aqlQuery.mockResolvedValueOnce({
+        data: [{ id: 'txn-search', payee: 'Target' }]
+      });
+
+      const result = await budget.searchTransactions('acc1', 'Target', { limit: 25, offset: 50 });
+      const query = mockActualApi.q.mock.results[0].value;
+
+      expect(mockActualApi.q).toHaveBeenCalledWith('transactions');
+      expect(query.options).toHaveBeenCalledWith({ splits: 'grouped' });
+      expect(query.filter).toHaveBeenCalledWith({
+        account: 'acc1',
+        tombstone: false,
+        is_parent: false,
+        $or: [
+          { 'payee.name': { $like: '%Target%' } },
+          { imported_payee: { $like: '%Target%' } },
+          { notes: { $like: '%Target%' } },
+          { 'category.name': { $like: '%Target%' } },
+        ],
+      });
+      expect(query.orderBy).toHaveBeenCalledWith([{ date: 'desc' }, { sort_order: 'desc' }]);
+      expect(query.limit).toHaveBeenCalledWith(25);
+      expect(query.offset).toHaveBeenCalledWith(50);
+      expect(query.select).toHaveBeenCalledWith('*');
+      expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
+      expect(result).toEqual([{ id: 'txn-search', payee: 'Target' }]);
+    });
+
     it('should add a single transaction', async () => {
       const transaction = { amount: 100, payee: 'Store' };
       const result = await budget.addTransaction('acc1', transaction);
@@ -338,6 +541,69 @@ describe('Budget Module', () => {
         learnCategories: false,
         runTransfers: false
       });
+    });
+
+    it('should run rules through Actual internals', async () => {
+      const transaction = {
+        id: 'draft-txn',
+        account: 'acc1',
+        date: '2026-06-14',
+        amount: -1299,
+        payee: 'payee1',
+      };
+      const ruledTransaction = { ...transaction, category: 'cat1' };
+      mockActualApi.internal.send.mockResolvedValueOnce(ruledTransaction);
+
+      const result = await budget.runRules(transaction);
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('rules-run', { transaction });
+      expect(result).toEqual(ruledTransaction);
+    });
+
+    it('should batch update transactions through Actual internals', async () => {
+      const diff = {
+        added: [{
+          id: 'txn-new',
+          account: 'acc1',
+          date: '2026-06-14',
+          amount: -1299,
+          category: 'cat-final',
+        }],
+        updated: [],
+        deleted: [],
+        learnCategories: false,
+        runTransfers: false,
+      };
+      const batchResult = {
+        added: ['txn-new'],
+        updated: [],
+        deleted: [],
+      };
+      mockActualApi.internal.send.mockResolvedValueOnce(batchResult);
+
+      const result = await budget.batchUpdateTransactions(diff);
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('transactions-batch-update', diff);
+      expect(result).toEqual(batchResult);
+    });
+
+    it('should default batch update options conservatively', async () => {
+      await budget.batchUpdateTransactions({ added: [{ id: 'txn-new' }] });
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('transactions-batch-update', {
+        added: [{ id: 'txn-new' }],
+        updated: [],
+        deleted: [],
+        learnCategories: false,
+        runTransfers: false,
+      });
+    });
+
+    it('should propagate Actual internal transaction editor errors', async () => {
+      const error = new Error('Actual internal error');
+      mockActualApi.internal.send.mockRejectedValueOnce(error);
+
+      await expect(budget.runRules({ id: 'draft-txn' })).rejects.toThrow('Actual internal error');
     });
 
     it('should import transactions with default options', async () => {

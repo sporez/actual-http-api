@@ -75,6 +75,9 @@ const { validatePaginationParameters, paginate } = require('../../utils/utils');
  */
 
 module.exports = (router) => {
+  const { config } = require('../../config/config');
+  const { EXPERIMENTAL_DISABLED_MESSAGE } = require('./constants');
+
   /**
    * @swagger
    * /budgets/{budgetSyncId}/rules:
@@ -224,6 +227,60 @@ module.exports = (router) => {
   router.post('/budgets/:budgetSyncId/rules', async (req, res, next) => {
     try {
       res.json({'data': await res.locals.budget.createRule(req.body.rule)});
+    } catch(err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/rules/run:
+   *   post:
+   *     summary: "(⚠️ Unofficial) Runs Actual rules against a draft transaction without saving it"
+   *     description: "⚠️ Unofficial: Experimental transaction editor endpoint that delegates to Actual's rules-run behavior and does not persist the transaction."
+   *     tags: [Rules]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             required:
+   *               - transaction
+   *             type: object
+   *             properties:
+   *               transaction:
+   *                 $ref: '#/components/schemas/Transaction'
+   *     responses:
+   *       '200':
+   *         description: The draft transaction after Actual rules are applied
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   $ref: '#/components/schemas/Transaction'
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   *       '501':
+   *         $ref: '#/components/responses/501'
+   */
+  router.post('/budgets/:budgetSyncId/rules/run', async (req, res, next) => {
+    try {
+      if (!config.experimentalOperationsEnabled) {
+        return res.status(501).json({ error: EXPERIMENTAL_DISABLED_MESSAGE });
+      }
+      validateDraftTransaction(req.body.transaction);
+      res.json({'data': await res.locals.budget.runRules(req.body.transaction)});
     } catch(err) {
       next(err);
     }
@@ -397,4 +454,19 @@ module.exports = (router) => {
       next(err);
     }
   });
+
+  function validateDraftTransaction(transaction) {
+    if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+      throw new Error('transaction information is required');
+    }
+    if (!transaction.account) {
+      throw new Error('transaction.account is required');
+    }
+    if (!transaction.date) {
+      throw new Error('transaction.date is required');
+    }
+    if (transaction.amount !== undefined && !Number.isInteger(transaction.amount)) {
+      throw new Error('transaction.amount must be an integer');
+    }
+  }
 }
