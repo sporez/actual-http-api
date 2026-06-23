@@ -125,6 +125,7 @@ describe('Budget Module', () => {
         orderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
         offset: jest.fn().mockReturnThis(),
+        calculate: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis()
       })),
       runQuery: jest.fn(),
@@ -446,6 +447,97 @@ describe('Budget Module', () => {
       const result = await budget.updateAccount('acc1', updates);
       expect(mockActualApi.updateAccount).toHaveBeenCalledWith('acc1', updates);
       expect(result.id).toBe('acc1');
+    });
+
+    it('should reconcile an account when the cleared balance matches the statement balance', async () => {
+      mockActualApi.aqlQuery
+        .mockResolvedValueOnce({ data: 5000 })
+        .mockResolvedValueOnce({
+          data: [
+            { id: 'child1', parent_id: 'parent1' },
+            { id: 'txn2', parent_id: null },
+          ],
+        });
+
+      const result = await budget.reconcileAccount('acc1', {
+        statementBalance: 5000,
+        cutoffDate: '2026-06-21',
+      });
+
+      expect(mockActualApi.internal.send).toHaveBeenCalledWith('transactions-batch-update', {
+        added: [],
+        updated: [
+          { id: 'child1', cleared: true, reconciled: true },
+          { id: 'parent1', cleared: true, reconciled: true },
+          { id: 'txn2', cleared: true, reconciled: true },
+        ],
+        deleted: [],
+        learnCategories: false,
+        runTransfers: false,
+      });
+      expect(mockActualApi.updateAccount).toHaveBeenCalledWith('acc1', {
+        name: 'Checking',
+        last_reconciled: '2026-06-21',
+      });
+      expect(result).toEqual({
+        accountId: 'acc1',
+        cutoffDate: '2026-06-21',
+        statementBalance: 5000,
+        clearedBalance: 5000,
+        difference: 0,
+        reconciled: true,
+        updated: ['child1', 'parent1', 'txn2'],
+      });
+    });
+
+    it('should default the reconciliation cutoff date to today', async () => {
+      jest.useFakeTimers().setSystemTime(new Date(2026, 5, 22, 12));
+      try {
+        mockActualApi.aqlQuery
+          .mockResolvedValueOnce({ data: 5000 })
+          .mockResolvedValueOnce({ data: [] });
+
+        const result = await budget.reconcileAccount('acc1', {
+          statementBalance: 5000,
+        });
+
+        expect(mockActualApi.updateAccount).toHaveBeenCalledWith('acc1', {
+          name: 'Checking',
+          last_reconciled: '2026-06-22',
+        });
+        expect(result).toEqual({
+          accountId: 'acc1',
+          cutoffDate: '2026-06-22',
+          statementBalance: 5000,
+          clearedBalance: 5000,
+          difference: 0,
+          reconciled: true,
+          updated: [],
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('should return the difference without mutating when balances do not match', async () => {
+      mockActualApi.aqlQuery.mockResolvedValueOnce({ data: 4750 });
+
+      const result = await budget.reconcileAccount('acc1', {
+        statementBalance: 5000,
+        cutoffDate: '2026-06-21',
+      });
+
+      expect(mockActualApi.internal.send).not.toHaveBeenCalledWith('transactions-batch-update', expect.anything());
+      expect(mockActualApi.updateAccount).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        accountId: 'acc1',
+        cutoffDate: '2026-06-21',
+        statementBalance: 5000,
+        clearedBalance: 4750,
+        difference: 250,
+        reconciled: false,
+        updated: [],
+      });
     });
 
     it('should delete an account', async () => {

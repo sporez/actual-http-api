@@ -10,6 +10,7 @@ Notable additions in this fork include:
 - Transaction search and editor-style write endpoints backed by Actual internals.
 - Rules preview for draft transactions.
 - Budget template apply endpoints, including whole-month and category-targeted overwrite flows.
+- Account reconciliation against statement balances with no mutation on mismatch.
 - Explicit split transaction payload validation for multi-category transactions.
 
 For Actualist deployments, use this fork's `main` branch or a tagged release from `sporez/actual-http-api`. Upstreamable changes are intended to be proposed back to `jhonderson/actual-http-api` as focused pull requests.
@@ -22,6 +23,7 @@ These fork endpoints are documented in Swagger UI and covered by tests:
 | --- | --- | --- |
 | `GET` | `/budgets/{budgetSyncId}/months/{month}/alerts` | Lightweight month alert pills for budget review. |
 | `POST` | `/budgets/{budgetSyncId}/months/{month}/templates/apply` | Apply budget templates for a month, including category-targeted overwrite. |
+| `POST` | `/budgets/{budgetSyncId}/accounts/{accountId}/reconcile` | Reconcile cleared transactions to a statement balance, returning the difference without mutation when balances do not match. |
 | `GET` | `/budgets/{budgetSyncId}/accounts/{accountId}/transactions/search` | Server-backed account transaction search across full history. |
 | `POST` | `/budgets/{budgetSyncId}/rules/run` | Experimental draft transaction rule preview without saving. |
 | `POST` | `/budgets/{budgetSyncId}/transactions/batch-update` | Experimental final transaction editor commit path through Actual batch update. |

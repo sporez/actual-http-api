@@ -80,6 +80,15 @@ describe('Accounts Routes', () => {
         name: 'Checking Updated',
         offbudget: false,
       }),
+      reconcileAccount: jest.fn().mockResolvedValue({
+        accountId: 'acc1',
+        cutoffDate: '2026-06-21',
+        statementBalance: 5000,
+        clearedBalance: 5000,
+        difference: 0,
+        reconciled: true,
+        updated: ['txn1'],
+      }),
       deleteAccount: jest.fn().mockResolvedValue(undefined),
       closeAccount: jest.fn().mockResolvedValue(undefined),
       reopenAccount: jest.fn().mockResolvedValue(undefined),
@@ -296,6 +305,128 @@ describe('Accounts Routes', () => {
 
       await handler(mockReq, mockRes, mockNext);
 
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
+  });
+
+  describe('POST /budgets/:budgetSyncId/accounts/:accountId/reconcile', () => {
+    it('should register the route', () => {
+      const accountsModule = require('../../../src/v1/routes/accounts');
+      accountsModule(mockRouter);
+
+      expect(mockRouter.post).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/accounts/:accountId/reconcile',
+        expect.any(Function)
+      );
+    });
+
+    it('should reconcile an account when balances match', async () => {
+      const accountsModule = require('../../../src/v1/routes/accounts');
+      accountsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/reconcile'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.body = {
+        statementBalance: 5000,
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.getAccount).toHaveBeenCalledWith('acc1');
+      expect(mockBudget.reconcileAccount).toHaveBeenCalledWith('acc1', mockReq.body);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          reconciled: true,
+          difference: 0,
+          updated: ['txn1'],
+        }),
+      });
+    });
+
+    it('should return mismatch results without treating them as route errors', async () => {
+      const accountsModule = require('../../../src/v1/routes/accounts');
+      accountsModule(mockRouter);
+
+      mockBudget.reconcileAccount.mockResolvedValueOnce({
+        accountId: 'acc1',
+        cutoffDate: '2026-06-21',
+        statementBalance: 5000,
+        clearedBalance: 4750,
+        difference: 250,
+        reconciled: false,
+        updated: [],
+      });
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/reconcile'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.body = {
+        statementBalance: 5000,
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          reconciled: false,
+          difference: 250,
+          updated: [],
+        }),
+      });
+    });
+
+    it('should reject non-integer statement balances', async () => {
+      const accountsModule = require('../../../src/v1/routes/accounts');
+      accountsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/reconcile'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.body = {
+        statementBalance: 50.25,
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.reconcileAccount).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'statementBalance must be an integer amount' })
+      );
+    });
+
+    it('should reject bad cutoff dates', async () => {
+      const accountsModule = require('../../../src/v1/routes/accounts');
+      accountsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/reconcile'];
+      mockReq.params.accountId = 'acc1';
+      mockReq.body = {
+        statementBalance: 5000,
+        cutoffDate: '06/21/2026',
+      };
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.reconcileAccount).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'cutoffDate must use YYYY-MM-DD format' })
+      );
+    });
+
+    it('should reject missing accounts', async () => {
+      const accountsModule = require('../../../src/v1/routes/accounts');
+      accountsModule(mockRouter);
+
+      const handler = handlers['POST /budgets/:budgetSyncId/accounts/:accountId/reconcile'];
+      mockReq.params.accountId = 'missing';
+      mockReq.body = {
+        statementBalance: 5000,
+        cutoffDate: '2026-06-21',
+      };
+      mockBudget.getAccount.mockResolvedValueOnce(null);
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.reconcileAccount).not.toHaveBeenCalled();
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
     });
   });

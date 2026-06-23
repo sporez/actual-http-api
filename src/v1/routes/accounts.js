@@ -53,8 +53,43 @@ const { isEmpty, formatDateToISOString } = require('../../utils/utils');
  *           type: boolean
  *         closed:
  *           type: boolean
+ *         last_reconciled:
+ *           type: string
+ *           nullable: true
+ *           description: Last successful reconciliation cutoff date in YYYY-MM-DD format.
  *     Amount:
  *       type: integer
+ *     AccountReconciliationResult:
+ *       type: object
+ *       required:
+ *         - accountId
+ *         - cutoffDate
+ *         - statementBalance
+ *         - clearedBalance
+ *         - difference
+ *         - reconciled
+ *         - updated
+ *       properties:
+ *         accountId:
+ *           type: string
+ *         cutoffDate:
+ *           type: string
+ *           description: Reconciliation cutoff date in YYYY-MM-DD format.
+ *         statementBalance:
+ *           type: integer
+ *         clearedBalance:
+ *           type: integer
+ *         difference:
+ *           type: integer
+ *           description: statementBalance minus clearedBalance.
+ *         reconciled:
+ *           type: boolean
+ *           description: False when the balances do not match; no mutation is performed in that case.
+ *         updated:
+ *           type: array
+ *           description: Transaction ids marked reconciled when balances match.
+ *           items:
+ *             type: string
  */
 
 module.exports = (router) => {
@@ -200,6 +235,67 @@ module.exports = (router) => {
       } else {
         throw new Error('Account not found');
       }
+    } catch(err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/accounts/{accountId}/reconcile:
+   *   post:
+   *     summary: "(🔧 Extended) Reconciles an account to a statement balance"
+   *     description: "🔧 Extended: Computes cleared balance from full Actual transaction history. If the statement balance differs, returns the difference and performs no mutation. If it matches, marks cleared unreconciled transactions through Actual's batch update pipeline and records the account reconciliation date."
+   *     tags: [Accounts]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/accountId'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             required:
+   *               - statementBalance
+   *             type: object
+   *             properties:
+   *               statementBalance:
+   *                 type: integer
+   *                 description: Statement balance in integer amount units.
+   *               cutoffDate:
+   *                 type: string
+   *                 description: Optional reconciliation cutoff date in YYYY-MM-DD format. Defaults to today when omitted.
+   *           example:
+   *             statementBalance: 123456
+   *     responses:
+   *       '200':
+   *         description: Reconciliation result. When reconciled is false, no data was changed.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   $ref: '#/components/schemas/AccountReconciliationResult'
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  router.post('/budgets/:budgetSyncId/accounts/:accountId/reconcile', async (req, res, next) => {
+    try {
+      validateAccountReconciliationBody(req.body);
+      await validateAccountExists(res, req.params.accountId);
+      res.json({
+        data: await res.locals.budget.reconcileAccount(req.params.accountId, req.body),
+      });
     } catch(err) {
       next(err);
     }
@@ -636,6 +732,21 @@ module.exports = (router) => {
   function validateAccountBody(account) {
     if (isEmpty(account)) {
       throw new Error('account information is required');
+    }
+  }
+
+  function validateAccountReconciliationBody(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new Error('reconciliation information is required');
+    }
+    if (!Number.isInteger(body.statementBalance)) {
+      throw new Error('statementBalance must be an integer amount');
+    }
+    if (
+      body.cutoffDate !== undefined &&
+      (typeof body.cutoffDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.cutoffDate))
+    ) {
+      throw new Error('cutoffDate must use YYYY-MM-DD format');
     }
   }
 }

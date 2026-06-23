@@ -29,6 +29,7 @@ describe('Swagger specification', () => {
     expect(openapiSpecification.paths).toEqual(expect.objectContaining({
       '/budgets/{budgetSyncId}/months/{month}/alerts': expect.any(Object),
       '/budgets/{budgetSyncId}/months/{month}/templates/apply': expect.any(Object),
+      '/budgets/{budgetSyncId}/accounts/{accountId}/reconcile': expect.any(Object),
       '/budgets/{budgetSyncId}/accounts/{accountId}/transactions/search': expect.any(Object),
       '/budgets/{budgetSyncId}/rules/run': expect.any(Object),
       '/budgets/{budgetSyncId}/transactions/batch-update': expect.any(Object),

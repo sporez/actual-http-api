@@ -201,6 +201,104 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     return actualApi.getAccountBalance(accountId, cutoffDate);                                                       
   } 
 
+  async function reconcileAccount(accountId, { statementBalance, cutoffDate }) {
+    const reconciliationDate = cutoffDate || currentLocalDateString();
+    const account = await getAccount(accountId);
+    if (!account) {
+      throw new Error('Account not found');
+    }
+
+    const clearedBalance = await getClearedBalance(accountId, reconciliationDate);
+    const difference = statementBalance - clearedBalance;
+    const result = {
+      accountId,
+      cutoffDate: reconciliationDate,
+      statementBalance,
+      clearedBalance,
+      difference,
+      reconciled: false,
+      updated: [],
+    };
+
+    if (difference !== 0) {
+      return result;
+    }
+
+    const candidates = await getReconciliationCandidates(accountId, reconciliationDate);
+    const updateIds = uniquePreservingOrder(
+      candidates.flatMap((transaction) => [transaction.id, transaction.parent_id]).filter(Boolean)
+    );
+
+    if (updateIds.length > 0) {
+      await batchUpdateTransactions({
+        updated: updateIds.map((id) => ({
+          id,
+          cleared: true,
+          reconciled: true,
+        })),
+        runTransfers: false,
+        learnCategories: false,
+      });
+    }
+
+    await updateAccount(accountId, {
+      name: account.name,
+      last_reconciled: reconciliationDate,
+    });
+
+    return {
+      ...result,
+      reconciled: true,
+      updated: updateIds,
+    };
+  }
+
+  function currentLocalDateString(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  async function getClearedBalance(accountId, cutoffDate) {
+    const result = await runQuery(
+      actualApi.q('transactions')
+        .filter({
+          account: accountId,
+          tombstone: false,
+          is_parent: false,
+          date: { $lte: cutoffDate },
+          $or: [
+            { cleared: true },
+            { reconciled: true },
+          ],
+        })
+        .calculate({ $sum: '$amount' })
+    );
+    return (result && Number.isInteger(result.data)) ? result.data : 0;
+  }
+
+  async function getReconciliationCandidates(accountId, cutoffDate) {
+    const result = await runQuery(
+      actualApi.q('transactions')
+        .options({ splits: 'all' })
+        .filter({
+          account: accountId,
+          tombstone: false,
+          is_parent: false,
+          cleared: true,
+          reconciled: false,
+          date: { $lte: cutoffDate },
+        })
+        .select(['id', 'parent_id'])
+    );
+    return (result && result.data) || [];
+  }
+
+  function uniquePreservingOrder(values) {
+    return [...new Set(values)];
+  }
+
   async function createAccount(account, initialBalance) {
     return actualApi.createAccount(account, initialBalance);
   }
@@ -587,6 +685,7 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     getAccounts: getAccounts,
     getAccount: getAccount,
     getAccountBalance: getAccountBalance,
+    reconcileAccount: reconcileAccount,
     createAccount: createAccount,
     updateAccount: updateAccount,
     deleteAccount: deleteAccount,
