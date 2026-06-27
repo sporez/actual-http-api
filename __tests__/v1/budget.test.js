@@ -52,7 +52,8 @@ describe('Budget Module', () => {
       setBudgetAmount: jest.fn().mockResolvedValue(undefined),
       setBudgetCarryover: jest.fn().mockResolvedValue(undefined),
       getAccounts: jest.fn().mockResolvedValue([
-        { id: 'acc1', name: 'Checking', balance: 5000 }
+        { id: 'acc1', name: 'Checking', balance: 5000 },
+        { id: 'acc2', name: 'Manual', balance: 1000 }
       ]),
       getAccountBalance: jest.fn().mockResolvedValue(5000),
       createAccount: jest.fn().mockResolvedValue({ id: 'acc2' }),
@@ -322,6 +323,47 @@ describe('Budget Module', () => {
       expect(query.select).toHaveBeenCalledWith(['id']);
       expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
     });
+
+    it('should get actionable uncategorized transactions for the requested month', async () => {
+      const transactions = [
+        {
+          id: 'txn1',
+          account: 'acc1',
+          date: '2026-06-10',
+          amount: -1200,
+          payee: 'payee1',
+          category: null,
+          transfer_id: null,
+          tombstone: false,
+        },
+      ];
+      mockActualApi.aqlQuery.mockResolvedValueOnce({ data: transactions });
+
+      const result = await budget.getUncategorizedTransactions('2026-06');
+
+      expect(result).toEqual(transactions);
+      const query = mockActualApi.q.mock.results[0].value;
+      expect(mockActualApi.q).toHaveBeenCalledWith('transactions');
+      expect(query.options).toHaveBeenCalledWith({ splits: 'all' });
+      expect(query.filter).toHaveBeenCalledWith({
+        is_parent: false,
+        tombstone: false,
+        category: null,
+        transfer_id: null,
+        date: [{ $gte: '2026-06-01' }, { $lt: '2026-07-01' }],
+      });
+      expect(query.select).toHaveBeenCalledWith([
+        'id',
+        'account',
+        'date',
+        'amount',
+        'payee',
+        'category',
+        'notes',
+        'cleared',
+      ]);
+      expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
+    });
     it('should apply whole-month templates through Actual internals', async () => {
       const notification = { type: 'message', message: 'Successfully applied templates to 3 categories' };
       mockActualApi.internal.send.mockResolvedValueOnce(notification);
@@ -412,14 +454,35 @@ describe('Budget Module', () => {
     });
 
     it('should get all accounts', async () => {
+      mockActualApi.aqlQuery.mockResolvedValueOnce({
+        data: [
+          { id: 'acc1', account_id: 'external-1', account_sync_source: 'simpleFin' },
+          { id: 'acc2', account_id: null, account_sync_source: null },
+        ],
+      });
+
       const accounts = await budget.getAccounts();
-      expect(accounts).toHaveLength(1);
+      expect(accounts).toHaveLength(2);
       expect(accounts[0].id).toBe('acc1');
+      expect(accounts[0].bankSyncLinked).toBe(true);
+      expect(accounts[1].bankSyncLinked).toBe(false);
+      const query = mockActualApi.q.mock.results[0].value;
+      expect(mockActualApi.q).toHaveBeenCalledWith('accounts');
+      expect(query.select).toHaveBeenCalledWith(['id', 'account_id', 'account_sync_source']);
+      expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
     });
 
     it('should get a specific account', async () => {
+      mockActualApi.aqlQuery.mockResolvedValueOnce({
+        data: [
+          { id: 'acc1', account_id: 'external-1', account_sync_source: 'simpleFin' },
+          { id: 'acc2', account_id: null, account_sync_source: null },
+        ],
+      });
+
       const account = await budget.getAccount('acc1');
       expect(account.id).toBe('acc1');
+      expect(account.bankSyncLinked).toBe(true);
     });
 
     it('should get account balance', async () => {
@@ -451,6 +514,7 @@ describe('Budget Module', () => {
 
     it('should reconcile an account when the cleared balance matches the statement balance', async () => {
       mockActualApi.aqlQuery
+        .mockResolvedValueOnce({ data: [] })
         .mockResolvedValueOnce({ data: 5000 })
         .mockResolvedValueOnce({
           data: [
@@ -494,6 +558,7 @@ describe('Budget Module', () => {
       jest.useFakeTimers().setSystemTime(new Date(2026, 5, 22, 12));
       try {
         mockActualApi.aqlQuery
+          .mockResolvedValueOnce({ data: [] })
           .mockResolvedValueOnce({ data: 5000 })
           .mockResolvedValueOnce({ data: [] });
 
@@ -520,7 +585,9 @@ describe('Budget Module', () => {
     });
 
     it('should return the difference without mutating when balances do not match', async () => {
-      mockActualApi.aqlQuery.mockResolvedValueOnce({ data: 4750 });
+      mockActualApi.aqlQuery
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValueOnce({ data: 4750 });
 
       const result = await budget.reconcileAccount('acc1', {
         statementBalance: 5000,

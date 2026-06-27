@@ -54,12 +54,14 @@ describe('Accounts Routes', () => {
           name: 'Checking',
           offbudget: false,
           closed: false,
+          bankSyncLinked: true,
         },
         {
           id: 'acc2',
           name: 'Savings',
           offbudget: false,
           closed: false,
+          bankSyncLinked: false,
         },
       ]),
       getAccount: jest.fn().mockResolvedValue({
@@ -67,6 +69,7 @@ describe('Accounts Routes', () => {
         name: 'Checking',
         offbudget: false,
         closed: false,
+        bankSyncLinked: true,
       }),
       getAccountBalance: jest.fn().mockResolvedValue(5000),
       createAccount: jest.fn().mockResolvedValue({
@@ -145,6 +148,7 @@ describe('Accounts Routes', () => {
           expect.objectContaining({
             id: 'acc1',
             name: 'Checking',
+            bankSyncLinked: true,
           }),
         ]),
       });
@@ -189,6 +193,7 @@ describe('Accounts Routes', () => {
         data: expect.objectContaining({
           id: 'acc1',
           name: 'Checking',
+          bankSyncLinked: true,
         }),
       });
     });

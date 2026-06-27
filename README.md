@@ -22,6 +22,7 @@ These fork endpoints are documented in Swagger UI and covered by tests:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/budgets/{budgetSyncId}/months/{month}/alerts` | Lightweight month alert pills for budget review. |
+| `GET` | `/budgets/{budgetSyncId}/months/{month}/transactions/uncategorized` | Actionable uncategorized transaction list for budget review. |
 | `POST` | `/budgets/{budgetSyncId}/months/{month}/templates/apply` | Apply budget templates for a month, including category-targeted overwrite. |
 | `POST` | `/budgets/{budgetSyncId}/accounts/{accountId}/reconcile` | Reconcile cleared transactions to a statement balance, returning the difference without mutation when balances do not match. |
 | `GET` | `/budgets/{budgetSyncId}/accounts/{accountId}/transactions/search` | Server-backed account transaction search across full history. |

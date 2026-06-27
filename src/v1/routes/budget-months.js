@@ -274,6 +274,59 @@ module.exports = (router) => {
       next(err);
     }
   });
+
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/months/{month}/transactions/uncategorized:
+   *   get:
+   *     summary: Get actionable uncategorized transactions for a budget month
+   *     description: Returns top-level, non-transfer, non-tombstoned transactions in a budget month with no category. This matches the uncategorized transaction alert count.
+   *     tags: [Budget Months]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/month'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     responses:
+   *       '200':
+   *         description: Uncategorized transactions for the month
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     $ref: '#/components/schemas/Transaction'
+   *               examples:
+   *                 - data:
+   *                     - id: txn1
+   *                       account: checking
+   *                       date: '2026-06-14'
+   *                       amount: -2350
+   *                       payee: grocery-payee
+   *                       category: null
+   *                       notes: null
+   *                       cleared: true
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  router.get('/budgets/:budgetSyncId/months/:month/transactions/uncategorized', async (req, res, next) => {
+    try {
+      validateMonthFormat(req.params.month);
+      res.json({'data': await res.locals.budget.getUncategorizedTransactions(req.params.month)});
+    } catch(err) {
+      next(err);
+    }
+  });
   
   /**
    * @swagger

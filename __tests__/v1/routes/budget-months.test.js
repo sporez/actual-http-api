@@ -60,6 +60,18 @@ describe('Budget Months Routes', () => {
           },
         ],
       }),
+      getUncategorizedTransactions: jest.fn().mockResolvedValue([
+        {
+          id: 'txn1',
+          account: 'acc1',
+          date: '2023-08-12',
+          amount: -1200,
+          payee: 'payee1',
+          category: null,
+          transfer_id: null,
+          tombstone: false,
+        },
+      ]),
       applyBudgetTemplates: jest.fn().mockResolvedValue({
         type: 'message',
         message: 'Successfully applied templates to 3 categories',
@@ -273,6 +285,71 @@ describe('Budget Months Routes', () => {
       mockReq.params.month = '2023-08';
       const error = new Error('Alert failure');
       mockBudget.getMonthAlerts.mockRejectedValueOnce(error);
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe('GET /budgets/:budgetSyncId/months/:month/transactions/uncategorized', () => {
+    it('should register the route', () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      expect(mockRouter.get).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/months/:month/transactions/uncategorized',
+        expect.any(Function)
+      );
+    });
+
+    it('should return uncategorized transactions for the month', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/months/:month/transactions/uncategorized'];
+      mockReq.params.month = '2023-08';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.getUncategorizedTransactions).toHaveBeenCalledWith('2023-08');
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: [
+          {
+            id: 'txn1',
+            account: 'acc1',
+            date: '2023-08-12',
+            amount: -1200,
+            payee: 'payee1',
+            category: null,
+            transfer_id: null,
+            tombstone: false,
+          },
+        ],
+      });
+    });
+
+    it('should reject invalid month format', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/months/:month/transactions/uncategorized'];
+      mockReq.params.month = '2023-8';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockBudget.getUncategorizedTransactions).not.toHaveBeenCalled();
+    });
+
+    it('should handle errors from getUncategorizedTransactions', async () => {
+      const budgetMonthsModule = require('../../../src/v1/routes/budget-months');
+      budgetMonthsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/months/:month/transactions/uncategorized'];
+      mockReq.params.month = '2023-08';
+      const error = new Error('Uncategorized failure');
+      mockBudget.getUncategorizedTransactions.mockRejectedValueOnce(error);
 
       await handler(mockReq, mockRes, mockNext);
 

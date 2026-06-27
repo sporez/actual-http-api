@@ -53,6 +53,9 @@ const { isEmpty, formatDateToISOString } = require('../../utils/utils');
  *           type: boolean
  *         closed:
  *           type: boolean
+ *         bankSyncLinked:
+ *           type: boolean
+ *           description: True when the account has linked bank-sync metadata and is eligible for account-level bank sync.
  *         last_reconciled:
  *           type: string
  *           nullable: true
@@ -121,9 +124,10 @@ module.exports = (router) => {
    *               examples:
    *                 - data:
    *                   - id: '671b669d-b616-4bf1-8a04-c82d73f87d5b'
-   *                     name: 'Checking'
-   *                     offbudget: false
-   *                     closed: false
+ *                     name: 'Checking'
+ *                     offbudget: false
+ *                     closed: false
+ *                     bankSyncLinked: true
    *       '404':
    *         $ref: '#/components/responses/404'
    *       '500':
@@ -165,9 +169,10 @@ module.exports = (router) => {
    *               examples:
    *                 - data:
    *                     id: '671b669d-b616-4bf1-8a04-c82d73f87d5b'
-   *                     name: 'Checking'
-   *                     offbudget: false
-   *                     closed: false
+ *                     name: 'Checking'
+ *                     offbudget: false
+ *                     closed: false
+ *                     bankSyncLinked: true
    *       '404':
    *         $ref: '#/components/responses/404'
    *       '500':

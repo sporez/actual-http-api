@@ -124,22 +124,39 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     }, 0);
   }
 
-  async function countUncategorizedTransactions(month) {
+  function actionableUncategorizedTransactionsQuery(month) {
     const startDate = `${month}-01`;
     const nextMonthDate = getNextMonthDate(month);
-    const result = await runQuery(
-      actualApi.q('transactions')
-        .options({ splits: 'all' })
-        .filter({
-          is_parent: false,
-          tombstone: false,
-          category: null,
-          transfer_id: null,
-          date: [{ $gte: startDate }, { $lt: nextMonthDate }],
-        })
-        .select(['id'])
-    );
+    return actualApi.q('transactions')
+      .options({ splits: 'all' })
+      .filter({
+        is_parent: false,
+        tombstone: false,
+        category: null,
+        transfer_id: null,
+        date: [{ $gte: startDate }, { $lt: nextMonthDate }],
+      });
+  }
+
+  async function countUncategorizedTransactions(month) {
+    const result = await runQuery(actionableUncategorizedTransactionsQuery(month).select(['id']));
     return ((result && result.data) || []).length;
+  }
+
+  async function getUncategorizedTransactions(month) {
+    const result = await runQuery(
+      actionableUncategorizedTransactionsQuery(month).select([
+        'id',
+        'account',
+        'date',
+        'amount',
+        'payee',
+        'category',
+        'notes',
+        'cleared',
+      ])
+    );
+    return (result && result.data) || [];
   }
 
   function getNextMonthDate(month) {
@@ -189,12 +206,32 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
   }
 
   async function getAccounts() {
-    return actualApi.getAccounts();
+    const accounts = await actualApi.getAccounts();
+    const bankSyncLinkedByAccountId = await getBankSyncLinkedByAccountId();
+    return accounts.map((account) => withBankSyncLinked(account, bankSyncLinkedByAccountId));
   }
 
   async function getAccount(accountId) {
     const accounts = await getAccounts();
     return accounts.find((account) => accountId == account.id);
+  }
+
+  async function getBankSyncLinkedByAccountId() {
+    const result = await runQuery(
+      actualApi.q('accounts').select(['id', 'account_id', 'account_sync_source'])
+    );
+    const metadata = Array.isArray(result && result.data) ? result.data : [];
+    return new Map(metadata.map((account) => [
+      account.id,
+      Boolean(account.account_id && account.account_sync_source === 'simpleFin'),
+    ]));
+  }
+
+  function withBankSyncLinked(account, bankSyncLinkedByAccountId) {
+    return {
+      ...account,
+      bankSyncLinked: bankSyncLinkedByAccountId.get(account.id) || false,
+    };
   }
                                                                                                 
   async function getAccountBalance(accountId, cutoffDate) {                                               
@@ -681,6 +718,7 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     getMonthCategoryGroups: getMonthCategoryGroups,
     getMonthCategoryGroup: getMonthCategoryGroup,
     getMonthAlerts: getMonthAlerts,
+    getUncategorizedTransactions: getUncategorizedTransactions,
     applyBudgetTemplates: applyBudgetTemplates,
     getAccounts: getAccounts,
     getAccount: getAccount,
