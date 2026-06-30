@@ -4,7 +4,10 @@ describe('Error Handler Middleware', () => {
   let req, res, next;
 
   beforeEach(() => {
-    req = {};
+    req = {
+      method: 'GET',
+      originalUrl: '/v1/budgets/test-budget/accounts',
+    };
     res = {
       status: jest.fn().mockReturnThis(),
       json: jest.fn(),
@@ -19,38 +22,92 @@ describe('Error Handler Middleware', () => {
   });
 
   describe('errorHandler', () => {
-    it('should return 500 for PostError with network-failure', () => {
+    it('should return 502 for PostError with network-failure', () => {
       const err = new Error('network-failure');
       err.type = 'PostError';
 
       errorHandler(err, req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.status).toHaveBeenCalledWith(502);
       expect(res.json).toHaveBeenCalledWith({
         error: 'Error accessing Actual Server, check Actual Server url',
+        code: 'ACTUAL_SERVER_UNREACHABLE',
       });
     });
 
-    it('should return 500 for PostError with Not Allowed', () => {
+    it('should return 502 for PostError with Not Allowed', () => {
       const err = new Error('Not Allowed');
       err.type = 'PostError';
 
       errorHandler(err, req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.status).toHaveBeenCalledWith(502);
       expect(res.json).toHaveBeenCalledWith({
         error: 'Error accessing Actual Server, check Actual Server url',
+        code: 'ACTUAL_SERVER_UNREACHABLE',
       });
     });
 
-    it('should return 500 for remote files error', () => {
+    it('should return 502 for PostError with unauthorized', () => {
+      const err = new Error('unauthorized');
+      err.type = 'PostError';
+      err.reason = 'unauthorized';
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(502);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Actual Server rejected the sync request as unauthorized',
+        code: 'ACTUAL_SYNC_UNAUTHORIZED',
+        details: 'Verify ACTUAL_SERVER_PASSWORD and restart actual-http-api to refresh the Actual API session.',
+      });
+    });
+
+    it('should return 502 for budget access errors', () => {
+      const err = new Error('Actual budget sync budget failed');
+      err.actualHttpApi = {
+        code: 'ACTUAL_BUDGET_ACCESS_FAILED',
+        operation: 'sync budget',
+      };
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(502);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Actual Server budget access failed',
+        code: 'ACTUAL_BUDGET_ACCESS_FAILED',
+        details: 'Failed while trying to sync budget. Check actual-http-api logs for the upstream Actual error.',
+      });
+    });
+
+    it('should log request context for server errors', () => {
+      const err = new Error('Some unknown error');
+
+      errorHandler(err, req, res, next);
+
+      expect(console.error).toHaveBeenCalledWith(
+        'Unknown error while interacting with Actual Api. See server logs for more information',
+        {
+          code: 'ACTUAL_API_UNKNOWN_ERROR',
+          details: undefined,
+          request: {
+            method: 'GET',
+            path: '/v1/budgets/test-budget/accounts',
+          },
+        },
+        err
+      );
+    });
+
+    it('should return 502 for remote files error', () => {
       const err = new Error('Could not get remote files');
 
       errorHandler(err, req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.status).toHaveBeenCalledWith(502);
       expect(res.json).toHaveBeenCalledWith({
         error: 'Error accessing Actual Server, check Actual Server password',
+        code: 'ACTUAL_SERVER_AUTH_FAILED',
       });
     });
 
@@ -143,6 +200,7 @@ describe('Error Handler Middleware', () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         error: 'Unknown error while interacting with Actual Api. See server logs for more information',
+        code: 'ACTUAL_API_UNKNOWN_ERROR',
       });
     });
   });

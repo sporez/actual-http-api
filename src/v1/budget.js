@@ -10,16 +10,21 @@ let syncIdToBudgetId = {};
 async function Budget(budgetSyncId, budgetEncryptionPassword) {
   const actualApi = await getActualApiClient();
   if (budgetSyncId in syncIdToBudgetId) {
-    await actualApi.loadBudget(syncIdToBudgetId[budgetSyncId]);
-    await actualApi.sync();
+    await runBudgetAccessStep(
+      () => actualApi.loadBudget(syncIdToBudgetId[budgetSyncId]),
+      'load cached budget'
+    );
+    await runBudgetAccessStep(
+      () => actualApi.sync(),
+      'sync budget'
+    );
   } else {
-    if (budgetEncryptionPassword) {
-      await actualApi.downloadBudget(budgetSyncId, {
-        password: budgetEncryptionPassword
-      });
-    } else {
-      await actualApi.downloadBudget(budgetSyncId);
-    }
+    await runBudgetAccessStep(
+      () => budgetEncryptionPassword
+        ? actualApi.downloadBudget(budgetSyncId, { password: budgetEncryptionPassword })
+        : actualApi.downloadBudget(budgetSyncId),
+      'download budget'
+    );
     refreshSincIdToBudgetIdMap();
   }
 
@@ -785,6 +790,27 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     runQuery: runQuery,
     shutdown: shutdown,
   };
+}
+
+async function runBudgetAccessStep(step, operation) {
+  try {
+    return await step();
+  } catch (err) {
+    throw createBudgetAccessError(err, operation);
+  }
+}
+
+function createBudgetAccessError(err, operation) {
+  const originalMessage = err && err.message ? `: ${err.message}` : '';
+  const wrapped = new Error(`Actual budget ${operation} failed${originalMessage}`);
+  wrapped.cause = err;
+  wrapped.type = err && err.type;
+  wrapped.reason = err && err.reason;
+  wrapped.actualHttpApi = {
+    code: 'ACTUAL_BUDGET_ACCESS_FAILED',
+    operation,
+  };
+  return wrapped;
 }
 
 exports.Budget = Budget;

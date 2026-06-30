@@ -43,7 +43,11 @@ app.listen(config.port, () => {
  */
 function ignoreUnhandledRejectionsCausedByActualApiLibrary(reason, promise) {
   if (isErrorComingFromActualApi(reason) && !doesActualErrorRequiresRestartingTheHttpService(reason)) {
-    console.log('Ignoring unhandledRejection caused by Actual api library');
+    console.log('Ignoring unhandledRejection caused by Actual api library', {
+      type: reason.type,
+      reason: reason.reason,
+      message: reason.message,
+    });
     return;
   }
   console.log('unhandledRejection', reason);
