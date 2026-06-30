@@ -115,5 +115,55 @@ describe('Actual Client Provider', () => {
         password: 'password',
       });
     });
+
+    it('should share in-flight initialization between concurrent calls', async () => {
+      const fs = require('fs');
+      fs.existsSync = jest.fn().mockReturnValue(true);
+      let resolveInit;
+      const initPromise = new Promise((resolve) => {
+        resolveInit = resolve;
+      });
+      const mockActualApi = {
+        init: jest.fn().mockReturnValue(initPromise),
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      };
+      jest.doMock('@actual-app/api', () => mockActualApi);
+
+      const clientPromise1 = provider.getActualApiClient();
+      const clientPromise2 = provider.getActualApiClient();
+      let resolvedBeforeInit = false;
+      clientPromise1.then(() => {
+        resolvedBeforeInit = true;
+      });
+
+      await Promise.resolve();
+
+      expect(mockActualApi.init).toHaveBeenCalledTimes(1);
+      expect(resolvedBeforeInit).toBe(false);
+
+      resolveInit();
+      const [client1, client2] = await Promise.all([clientPromise1, clientPromise2]);
+
+      expect(client1).toBe(mockActualApi);
+      expect(client2).toBe(mockActualApi);
+    });
+
+    it('should retry initialization after an initialization failure', async () => {
+      const fs = require('fs');
+      fs.existsSync = jest.fn().mockReturnValue(true);
+      const mockActualApi = {
+        init: jest.fn()
+          .mockRejectedValueOnce(new Error('init failed'))
+          .mockResolvedValueOnce(undefined),
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      };
+      jest.doMock('@actual-app/api', () => mockActualApi);
+
+      await expect(provider.getActualApiClient()).rejects.toThrow('init failed');
+      const client = await provider.getActualApiClient();
+
+      expect(client).toBe(mockActualApi);
+      expect(mockActualApi.init).toHaveBeenCalledTimes(2);
+    });
   });
 });
