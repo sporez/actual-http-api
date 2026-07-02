@@ -642,6 +642,43 @@ describe('Budget Module', () => {
       expect(mockActualApi.getTransactions).toHaveBeenCalledWith('acc1', '2024-01-01', '2024-01-31');
     });
 
+    it('should get all transactions with ActualQL', async () => {
+      mockActualApi.aqlQuery.mockResolvedValueOnce({
+        data: [
+          { id: 'txn1', account: 'acc1', amount: 100 },
+          { id: 'txn2', account: 'acc2', amount: -50 },
+        ]
+      });
+
+      const result = await budget.getAllTransactions('2024-01-01', '2024-01-31');
+      const query = mockActualApi.q.mock.results[0].value;
+
+      expect(mockActualApi.q).toHaveBeenCalledWith('transactions');
+      expect(query.options).toHaveBeenCalledWith({ splits: 'grouped' });
+      expect(query.filter).toHaveBeenCalledWith({
+        tombstone: false,
+        is_parent: false,
+        date: [{ $gte: '2024-01-01' }, { $lte: '2024-01-31' }],
+      });
+      expect(query.orderBy).toHaveBeenCalledWith([{ date: 'desc' }, { sort_order: 'desc' }]);
+      expect(query.select).toHaveBeenCalledWith('*');
+      expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
+      expect(result).toEqual([
+        { id: 'txn1', account: 'acc1', amount: 100 },
+        { id: 'txn2', account: 'acc2', amount: -50 },
+      ]);
+    });
+
+    it('should default all transaction until date to today', async () => {
+      await budget.getAllTransactions('2024-01-01');
+      const query = mockActualApi.q.mock.results[0].value;
+
+      expect(formatDateToISOString).toHaveBeenCalledWith(new Date('2024-01-15'));
+      expect(query.filter).toHaveBeenCalledWith(expect.objectContaining({
+        date: [{ $gte: '2024-01-01' }, { $lte: '2024-01-15' }],
+      }));
+    });
+
     it('should search transactions with ActualQL', async () => {
       mockActualApi.aqlQuery.mockResolvedValueOnce({
         data: [{ id: 'txn-search', payee: 'Target' }]
@@ -669,6 +706,34 @@ describe('Budget Module', () => {
       expect(query.select).toHaveBeenCalledWith('*');
       expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
       expect(result).toEqual([{ id: 'txn-search', payee: 'Target' }]);
+    });
+
+    it('should search all transactions with ActualQL', async () => {
+      mockActualApi.aqlQuery.mockResolvedValueOnce({
+        data: [{ id: 'txn-search-all', account: 'acc2', payee: 'Target' }]
+      });
+
+      const result = await budget.searchAllTransactions('Target', { limit: 25, offset: 50 });
+      const query = mockActualApi.q.mock.results[0].value;
+
+      expect(mockActualApi.q).toHaveBeenCalledWith('transactions');
+      expect(query.options).toHaveBeenCalledWith({ splits: 'grouped' });
+      expect(query.filter).toHaveBeenCalledWith({
+        tombstone: false,
+        is_parent: false,
+        $or: [
+          { 'payee.name': { $like: '%Target%' } },
+          { imported_payee: { $like: '%Target%' } },
+          { notes: { $like: '%Target%' } },
+          { 'category.name': { $like: '%Target%' } },
+        ],
+      });
+      expect(query.orderBy).toHaveBeenCalledWith([{ date: 'desc' }, { sort_order: 'desc' }]);
+      expect(query.limit).toHaveBeenCalledWith(25);
+      expect(query.offset).toHaveBeenCalledWith(50);
+      expect(query.select).toHaveBeenCalledWith('*');
+      expect(mockActualApi.aqlQuery).toHaveBeenCalledWith(query);
+      expect(result).toEqual([{ id: 'txn-search-all', account: 'acc2', payee: 'Target' }]);
     });
 
     it('should add a single transaction', async () => {

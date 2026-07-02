@@ -366,6 +366,22 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     return actualApi.getTransactions(accountId, sinceDate, untilDate);
   }
 
+  async function getAllTransactions(sinceDate, optionalUntilDate) {
+    const untilDate = optionalUntilDate || formatDateToISOString(currentLocalDate());
+    const result = await runQuery(
+      actualApi.q('transactions')
+        .options({ splits: 'grouped' })
+        .filter({
+          tombstone: false,
+          is_parent: false,
+          date: [{ $gte: sinceDate }, { $lte: untilDate }],
+        })
+        .orderBy([{ date: 'desc' }, { sort_order: 'desc' }])
+        .select('*')
+    );
+    return (result && result.data) || [];
+  }
+
   async function searchTransactions(accountId, query, { limit = 50, offset = 0 } = {}) {
     const searchTerm = query.trim();
     const likeTerm = `%${escapeLikeTerm(searchTerm)}%`;
@@ -374,6 +390,30 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
         .options({ splits: 'grouped' })
         .filter({
           account: accountId,
+          tombstone: false,
+          is_parent: false,
+          $or: [
+            { 'payee.name': { $like: likeTerm } },
+            { imported_payee: { $like: likeTerm } },
+            { notes: { $like: likeTerm } },
+            { 'category.name': { $like: likeTerm } },
+          ],
+        })
+        .orderBy([{ date: 'desc' }, { sort_order: 'desc' }])
+        .limit(limit)
+        .offset(offset)
+        .select('*')
+    );
+    return (result && result.data) || [];
+  }
+
+  async function searchAllTransactions(query, { limit = 50, offset = 0 } = {}) {
+    const searchTerm = query.trim();
+    const likeTerm = `%${escapeLikeTerm(searchTerm)}%`;
+    const result = await runQuery(
+      actualApi.q('transactions')
+        .options({ splits: 'grouped' })
+        .filter({
           tombstone: false,
           is_parent: false,
           $or: [
@@ -735,7 +775,9 @@ async function Budget(budgetSyncId, budgetEncryptionPassword) {
     closeAccount: closeAccount,
     reopenAccount: reopenAccount,
     getTransactions: getTransactions,
+    getAllTransactions: getAllTransactions,
     searchTransactions: searchTransactions,
+    searchAllTransactions: searchAllTransactions,
     addTransaction: addTransaction,
     addTransactions: addTransactions,
     runRules: runRules,

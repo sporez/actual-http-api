@@ -8,6 +8,7 @@ Notable additions in this fork include:
 
 - Budget month alerts for lightweight app badges and review prompts.
 - Transaction search and editor-style write endpoints backed by Actual internals.
+- Budget-wide transaction list and search endpoints for all-account transaction review.
 - Rules preview for draft transactions.
 - Budget template apply endpoints, including whole-month and category-targeted overwrite flows.
 - Account reconciliation against statement balances with no mutation on mismatch.
@@ -25,6 +26,8 @@ These fork endpoints are documented in Swagger UI and covered by tests:
 | `GET` | `/budgets/{budgetSyncId}/months/{month}/transactions/uncategorized` | Actionable uncategorized transaction list for budget review. |
 | `POST` | `/budgets/{budgetSyncId}/months/{month}/templates/apply` | Apply budget templates for a month, including category-targeted overwrite. |
 | `POST` | `/budgets/{budgetSyncId}/accounts/{accountId}/reconcile` | Reconcile cleared transactions to a statement balance, returning the difference without mutation when balances do not match. |
+| `GET` | `/budgets/{budgetSyncId}/transactions` | Server-backed transaction list across all accounts with date range and page/limit support. |
+| `GET` | `/budgets/{budgetSyncId}/transactions/search` | Server-backed transaction search across all accounts. |
 | `GET` | `/budgets/{budgetSyncId}/accounts/{accountId}/transactions/search` | Server-backed account transaction search across full history. |
 | `POST` | `/budgets/{budgetSyncId}/rules/run` | Experimental draft transaction rule preview without saving. |
 | `POST` | `/budgets/{budgetSyncId}/transactions/batch-update` | Experimental final transaction editor commit path through Actual batch update. |

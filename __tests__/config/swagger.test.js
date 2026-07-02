@@ -32,6 +32,8 @@ describe('Swagger specification', () => {
       '/budgets/{budgetSyncId}/months/{month}/templates/apply': expect.any(Object),
       '/budgets/{budgetSyncId}/accounts/{accountId}/reconcile': expect.any(Object),
       '/budgets/{budgetSyncId}/accounts/{accountId}/transactions/search': expect.any(Object),
+      '/budgets/{budgetSyncId}/transactions': expect.any(Object),
+      '/budgets/{budgetSyncId}/transactions/search': expect.any(Object),
       '/budgets/{budgetSyncId}/rules/run': expect.any(Object),
       '/budgets/{budgetSyncId}/transactions/batch-update': expect.any(Object),
     }));

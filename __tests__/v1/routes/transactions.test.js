@@ -55,12 +55,40 @@ describe('Transactions Routes', () => {
           cleared: false,
         },
       ]),
+      getAllTransactions: jest.fn().mockResolvedValue([
+        {
+          id: 'txn1',
+          account: 'acc1',
+          date: '2023-08-01',
+          amount: -50,
+          payee: 'Store',
+          cleared: true,
+        },
+        {
+          id: 'txn3',
+          account: 'acc2',
+          date: '2023-08-03',
+          amount: -25,
+          payee: 'Coffee Shop',
+          cleared: false,
+        },
+      ]),
       searchTransactions: jest.fn().mockResolvedValue([
         {
           id: 'txn-search',
           account: 'acc1',
           date: '2023-08-03',
           amount: -1250,
+          payee: 'Target',
+          cleared: true,
+        },
+      ]),
+      searchAllTransactions: jest.fn().mockResolvedValue([
+        {
+          id: 'txn-search-all',
+          account: 'acc2',
+          date: '2023-08-04',
+          amount: -3200,
           payee: 'Target',
           cleared: true,
         },
@@ -105,6 +133,184 @@ describe('Transactions Routes', () => {
     jest.clearAllTimers();
     jest.dontMock('../../../src/config/config');
     delete process.env.EXPERIMENTAL_OPERATIONS_ENABLED;
+  });
+
+  describe('GET /budgets/:budgetSyncId/transactions', () => {
+    it('should register the route', () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      expect(mockRouter.get).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/transactions',
+        expect.any(Function)
+      );
+    });
+
+    it('should return transactions across all accounts', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions'];
+      mockReq.query.since_date = '2023-08-01';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.getAllTransactions).toHaveBeenCalledWith('2023-08-01', undefined);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: expect.arrayContaining([
+          expect.objectContaining({ id: 'txn1', account: 'acc1' }),
+          expect.objectContaining({ id: 'txn3', account: 'acc2' }),
+        ]),
+      });
+    });
+
+    it('should return transactions with date range', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions'];
+      mockReq.query.since_date = '2023-08-01';
+      mockReq.query.until_date = '2023-08-31';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.getAllTransactions).toHaveBeenCalledWith('2023-08-01', '2023-08-31');
+    });
+
+    it('should reject without since_date', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions'];
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
+
+    it('should support pagination with page and limit', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions'];
+      mockReq.query.since_date = '2023-08-01';
+      mockReq.query.page = '1';
+      mockReq.query.limit = '10';
+      mockBudget.getAllTransactions.mockResolvedValueOnce(
+        Array(15).fill(null).map((_, i) => ({
+          id: `txn${i}`,
+          account: i % 2 === 0 ? 'acc1' : 'acc2',
+          date: '2023-08-01',
+          amount: -50,
+        }))
+      );
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockRes.json).toHaveBeenCalled();
+      const data = mockRes.json.mock.calls[0][0].data;
+      expect(data).toHaveLength(10);
+    });
+
+    it('should reject pagination with only page', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions'];
+      mockReq.query.since_date = '2023-08-01';
+      mockReq.query.page = '1';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
+
+    it('should handle errors from getAllTransactions', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions'];
+      mockReq.query.since_date = '2023-08-01';
+      const error = new Error('Database error');
+      mockBudget.getAllTransactions.mockRejectedValueOnce(error);
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe('GET /budgets/:budgetSyncId/transactions/search', () => {
+    it('should register the route', () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      expect(mockRouter.get).toHaveBeenCalledWith(
+        '/budgets/:budgetSyncId/transactions/search',
+        expect.any(Function)
+      );
+    });
+
+    it('should search transactions across all accounts', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions/search'];
+      mockReq.query.q = 'target';
+      mockReq.query.limit = '25';
+      mockReq.query.offset = '50';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.searchAllTransactions).toHaveBeenCalledWith('target', {
+        limit: 25,
+        offset: 50,
+      });
+      expect(mockRes.json).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ id: 'txn-search-all', account: 'acc2' })],
+      });
+    });
+
+    it('should default search paging options', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions/search'];
+      mockReq.query.q = 'target';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.searchAllTransactions).toHaveBeenCalledWith('target', {
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    it('should reject missing search query', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions/search'];
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.searchAllTransactions).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
+
+    it('should reject invalid search paging options', async () => {
+      const transactionsModule = require('../../../src/v1/routes/transactions');
+      transactionsModule(mockRouter);
+
+      const handler = handlers['GET /budgets/:budgetSyncId/transactions/search'];
+      mockReq.query.q = 'target';
+      mockReq.query.limit = '0';
+
+      await handler(mockReq, mockRes, mockNext);
+
+      expect(mockBudget.searchAllTransactions).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+    });
   });
 
   describe('GET /budgets/:budgetSyncId/accounts/:accountId/transactions', () => {

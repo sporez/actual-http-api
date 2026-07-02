@@ -87,6 +87,130 @@ module.exports = (router) => {
 
   /**
    * @swagger
+   * /budgets/{budgetSyncId}/transactions:
+   *   get:
+   *     summary: Returns list of transactions across all accounts
+   *     description: Returns top-level, non-tombstoned transactions across all accounts. Each row includes its account id so clients can perform account-scoped transaction actions.
+   *     tags: [Transactions]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - $ref: '#/components/parameters/sinceDate'
+   *       - $ref: '#/components/parameters/untilDate'
+   *       - $ref: '#/components/parameters/page'
+   *       - $ref: '#/components/parameters/limit'
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     responses:
+   *       '200':
+   *         description: The list of transactions across all accounts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     $ref: '#/components/schemas/Transaction'
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  /**
+   * @swagger
+   * /budgets/{budgetSyncId}/transactions/search:
+   *   get:
+   *     summary: Searches transactions across all accounts
+   *     description: Searches full budget transaction history by payee, imported payee, notes, or category name. Each row includes its account id.
+   *     tags: [Transactions]
+   *     security:
+   *       - apiKey: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/budgetSyncId'
+   *       - name: q
+   *         in: query
+   *         schema:
+   *           type: string
+   *         required: true
+   *         description: Search text.
+   *       - name: limit
+   *         in: query
+   *         schema:
+   *           type: integer
+   *           minimum: 1
+   *           default: 50
+   *         required: false
+   *         description: Number of transactions to return.
+   *       - name: offset
+   *         in: query
+   *         schema:
+   *           type: integer
+   *           minimum: 0
+   *           default: 0
+   *         required: false
+   *         description: Number of matching transactions to skip.
+   *       - $ref: '#/components/parameters/budgetEncryptionPassword'
+   *     responses:
+   *       '200':
+   *         description: The matching transactions across all accounts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               required:
+   *                 - data
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     $ref: '#/components/schemas/Transaction'
+   *       '400':
+   *         $ref: '#/components/responses/400'
+   *       '404':
+   *         $ref: '#/components/responses/404'
+   *       '500':
+   *         $ref: '#/components/responses/500'
+   */
+  router.get('/budgets/:budgetSyncId/transactions/search', async (req, res, next) => {
+    try {
+      const query = validateSearchQuery(req.query.q);
+      const limit = validateSearchInteger(req.query.limit, 'limit', 50, { minimum: 1 });
+      const offset = validateSearchInteger(req.query.offset, 'offset', 0);
+
+      const transactions = await res.locals.budget.searchAllTransactions(query, { limit, offset });
+      res.json({ data: transactions });
+    }
+    catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/budgets/:budgetSyncId/transactions', async (req, res, next) => {
+    try {
+      if (!req.query.since_date) {
+        throw new Error('since_date query parameter is required');
+      }
+      let allTransactions = await res.locals.budget.getAllTransactions(req.query.since_date, req.query.until_date);
+      if (req.query.page || req.query.limit) {
+        validatePaginationParameters(req);
+        res.json({ 'data': paginate(allTransactions, parseInt(req.query.page), parseInt(req.query.limit)) });
+      } else {
+        res.json({ 'data': allTransactions });
+      }
+    }
+    catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @swagger
    * /budgets/{budgetSyncId}/accounts/{accountId}/transactions:
    *   get:
    *     summary: Returns list of transactions for an account
